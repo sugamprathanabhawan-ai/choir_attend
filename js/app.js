@@ -53,7 +53,23 @@ $('loginForm').addEventListener('submit', async event => { event.preventDefault(
 $('resetPassword').addEventListener('click', async () => { const email = $('loginEmail').value.trim(); if (!email) return toast('Enter your email first.', 'error'); const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.href }); toast(error ? error.message : 'Password-reset email sent.', error ? 'error' : 'ok'); });
 
 function startClock() { const render = () => text('nepalClock', new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format()); render(); setInterval(render, 1000); }
-async function signedSelfie() { if (!profile.selfie_path) return; const { data } = await supabase.storage.from('choir-selfies').createSignedUrl(profile.selfie_path, 3600); if (data?.signedUrl) $('navSelfie').src = data.signedUrl; }
+async function signedSelfie() {
+  const storedPath = profile?.selfie_path?.trim();
+  if (!storedPath || !user) return;
+
+  // Older profile rows saved only "selfie.jpg". Storage objects are scoped to
+  // their owner, so prefer the current user's folder while retaining a fallback
+  // for any legacy object that was stored with its full path.
+  const paths = storedPath.includes('/') ? [storedPath] : [`${user.id}/${storedPath}`, storedPath];
+  for (const path of paths) {
+    const { data, error } = await supabase.storage.from('choir-selfies').createSignedUrl(path, 3600);
+    if (!error && data?.signedUrl) {
+      $('navSelfie').src = data.signedUrl;
+      return;
+    }
+  }
+  toast('Your selfie could not be loaded. Please upload it again.', 'error');
+}
 async function boot() {
   const { data: { user: activeUser } } = await supabase.auth.getUser(); if (!activeUser) return;
   user = activeUser; try { await uploadPendingSelfie(); } catch (error) { toast(`Selfie upload: ${error.message}`, 'error'); }
