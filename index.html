@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Sugam Prathana Bhawan Choir Attendance">
   <title>Sugam Choir Portal</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -10,7 +11,19 @@
 <body class="min-h-screen bg-slate-100 text-slate-800">
   <div id="toast" class="fixed right-5 top-5 z-50 hidden max-w-sm rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-xl"></div>
 
-  <main id="authView" class="mx-auto flex min-h-screen max-w-5xl items-center p-5">
+  <!-- Global Header Navigation -->
+  <header class="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur-md">
+    <div class="mx-auto flex max-w-7xl items-center justify-between px-5 py-3">
+      <div class="flex items-center gap-2">
+        <span class="text-base font-black tracking-tight text-ink">SUGAM <span class="text-gold">CHOIR</span></span>
+      </div>
+      <a href="https://sugamchurch.vercel.app/" class="inline-flex items-center rounded-full bg-ink px-5 py-2 text-xs font-extrabold uppercase tracking-wider text-white shadow-sm transition hover:bg-slate-800 hover:shadow">
+        Home
+      </a>
+    </div>
+  </header>
+
+  <main id="authView" class="mx-auto flex min-h-[calc(100vh-60px)] max-w-5xl items-center p-5">
     <div class="grid w-full overflow-hidden rounded-3xl bg-white shadow-2xl md:grid-cols-5">
       <section class="bg-ink p-8 text-white md:col-span-2 md:p-12">
         <p class="text-xs font-bold uppercase tracking-[.28em] text-gold">Sugam Prathana Bhawan</p>
@@ -41,7 +54,24 @@
   </main>
 
   <main id="appView" class="hidden min-h-screen">
-    <nav class="sticky top-0 z-40 border-b bg-white/95 backdrop-blur"><div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3"><div><p class="text-sm font-black text-ink">SUGAM <span class="text-gold">CHOIR</span></p><p id="navEmail" class="text-xs text-slate-500"></p></div><div class="flex items-center gap-3"><img id="navSelfie" class="h-9 w-9 rounded-full bg-slate-200 object-cover" alt="Your selfie"><span id="navName" class="hidden text-sm font-bold sm:inline"></span><button id="logoutBtn" class="rounded-lg px-3 py-2 text-sm font-bold hover:bg-slate-100">Log out</button></div></div></nav>
+    <nav class="sticky top-[53px] z-40 border-b bg-white/95 backdrop-blur">
+      <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
+        <div class="flex items-center gap-4">
+          <a href="https://sugamchurch.vercel.app/" class="inline-flex items-center rounded-full bg-ink px-4 py-1.5 text-xs font-extrabold text-white transition hover:bg-slate-800">
+            Home
+          </a>
+          <div>
+            <p class="text-sm font-black text-ink">SUGAM <span class="text-gold">CHOIR</span></p>
+            <p id="navEmail" class="text-xs text-slate-500"></p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <img id="navSelfie" class="h-9 w-9 rounded-full bg-slate-200 object-cover" alt="Your selfie">
+          <span id="navName" class="hidden text-sm font-bold sm:inline"></span>
+          <button id="logoutBtn" class="rounded-lg px-3 py-2 text-sm font-bold hover:bg-slate-100">Log out</button>
+        </div>
+      </div>
+    </nav>
     <div class="mx-auto max-w-7xl p-5 md:p-8">
       <section id="pendingPanel" class="hidden rounded-2xl border border-amber-300 bg-amber-50 p-5"><b>Thank you.</b> Please wait for the administrator to accept your request. You can sign in, but attendance opens after approval.</section>
       <section id="memberPanel" class="space-y-6">
@@ -59,4 +89,5 @@
   <script src="./js/config.js"></script>
   <script type="module" src="./js/app.js"></script>
   <style>.input{width:100%;border:1px solid #cbd5e1;border-radius:.75rem;padding:.7rem .85rem;outline:none}.input:focus{border-color:#14213d;box-shadow:0 0 0 3px #14213d16}.label{display:block;margin-bottom:.35rem;font-size:.8rem;font-weight:700;color:#475569}.primary-btn{border-radius:.75rem;background:#14213d;padding:.8rem 1rem;color:#fff;font-weight:800}.primary-btn:hover{background:#23345b}.secondary-btn{border-radius:.75rem;background:#e2e8f0;padding:.7rem 1rem;font-size:.875rem;font-weight:800}.status-btn.active{border-color:#14213d;background:#14213d;color:white}.table-wrap{margin-top:1rem;overflow:auto;max-height:24rem}.table-wrap table{width:100%;font-size:.8rem}.table-wrap th,.table-wrap td{padding:.65rem;text-align:left;border-bottom:1px solid #e2e8f0}.table-wrap th{position:sticky;top:0;background:white;font-size:.7rem;text-transform:uppercase;color:#64748b}</style>
-</body></html>
+</body>
+</html>
