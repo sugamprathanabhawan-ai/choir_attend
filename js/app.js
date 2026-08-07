@@ -14,6 +14,22 @@ function escape(value = '') { const el = document.createElement('span'); el.text
 function nptNow() { return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' })); }
 function nptDate(value = new Date()) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value); }
 function isAdmin() { return profile?.role === 'admin' && profile?.status === 'approved'; }
+function clearAttendanceResult() { $('attendanceResult').classList.add('hidden'); $('retryAttendance').classList.add('hidden'); }
+function showAttendanceResult(title, detail, type = 'success') {
+  const result = $('attendanceResult');
+  result.className = `rounded-xl border p-4 md:col-span-2 ${type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-red-200 bg-red-50 text-red-900'}`;
+  text('attendanceResultTitle', title); text('attendanceResultDetail', detail);
+  $('retryAttendance').classList.toggle('hidden', type === 'success');
+}
+function attendanceResultMessage(record) {
+  const pointMessage = record.point === 1
+    ? 'You received 1 point because your monthly holiday had already been used.'
+    : record.holiday_used === 1
+      ? 'You received no point because this is the first holiday used this month.'
+      : 'You received no point because you were present on time.';
+  const timeMessage = record.attendance_on_time === 1 ? 'It was recorded on time.' : 'It was recorded after the 9:50 AM on-time deadline.';
+  return `${pointMessage} ${timeMessage}`;
+}
 
 document.querySelectorAll('[data-auth-tab]').forEach(button => button.addEventListener('click', () => showAuth(button.dataset.authTab)));
 function showAuth(tab) { document.querySelectorAll('.auth-form').forEach(el => el.classList.add('hidden')); $(`${tab}Form`).classList.remove('hidden'); document.querySelectorAll('.auth-tab').forEach(el => el.classList.toggle('bg-white', el.dataset.authTab === tab)); }
@@ -80,6 +96,7 @@ async function boot() {
   if (profile.status !== 'approved') $('pendingPanel').classList.remove('hidden'); await loadMember(); if (isAdmin()) { $('adminPanel').classList.remove('hidden'); await loadAdmin(); }
 }
 async function loadMember() {
+  text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
   const [lawResult, aggregateResult, logsResult] = await Promise.all([
     supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).maybeSingle(),
     supabase.from('choir_attendance_aggregate').select('*').eq('user_id', user.id).maybeSingle(),
@@ -92,10 +109,24 @@ async function loadMember() {
   const npt = nptNow(); const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
   text('attendanceState', inWindow && profile.status === 'approved' ? 'Form is open' : profile.status === 'approved' ? 'Form is closed' : 'Approval required'); $('attendanceSubmit').disabled = !inWindow || profile.status !== 'approved';
 }
-$('symbolInput').addEventListener('input', () => { text('symbolName', $('symbolInput').value.trim() === profile?.symbolnum ? profile.full_name : ''); });
-document.querySelectorAll('.status-btn').forEach(button => button.addEventListener('click', () => { selectedStatus = button.dataset.status; document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el === button)); $('reasonWrap').classList.toggle('hidden', selectedStatus !== 'absent'); }));
+$('retryAttendance').addEventListener('click', () => $('attendanceForm').requestSubmit());
+document.querySelectorAll('.status-btn').forEach(button => button.addEventListener('click', () => { selectedStatus = button.dataset.status; document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el === button)); $('reasonWrap').classList.toggle('hidden', selectedStatus !== 'absent'); clearAttendanceResult(); }));
 document.querySelector('[data-status="present"]').click();
-$('attendanceForm').addEventListener('submit', async event => { event.preventDefault(); const reason = $('reasonInput').value.trim(); if (selectedStatus === 'absent' && reason.length < 3) return toast('Please enter a valid reason for absence.', 'error'); const button = $('attendanceSubmit'); button.disabled = true; const { error } = await supabase.rpc('choir_submit_attendance', { p_symbol: $('symbolInput').value.trim(), p_status: selectedStatus, p_reason: reason || null }); if (error) toast(error.message, 'error'); else { toast('Attendance submitted.'); event.target.reset(); selectedStatus = 'present'; document.querySelector('[data-status="present"]').click(); await loadMember(); } button.disabled = false; });
+$('attendanceForm').addEventListener('submit', async event => {
+  event.preventDefault(); const reason = $('reasonInput').value.trim();
+  if (selectedStatus === 'absent' && reason.length < 3) return toast('Please enter a valid reason for absence.', 'error');
+  const button = $('attendanceSubmit'); button.disabled = true; clearAttendanceResult();
+  const { data, error } = await supabase.rpc('choir_submit_attendance', { p_symbol: profile.symbolnum, p_status: selectedStatus, p_reason: reason || null });
+  button.disabled = false;
+  if (error) {
+    showAttendanceResult('Attendance was not saved.', `${error.message} Please check your connection and retry.`, 'error');
+    return toast(error.message, 'error');
+  }
+  showAttendanceResult('Attendance logged successfully.', attendanceResultMessage(data));
+  toast('Attendance submitted successfully.'); event.target.reset(); selectedStatus = 'present';
+  document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el.dataset.status === 'present'));
+  $('reasonWrap').classList.add('hidden'); await loadMember();
+});
 
 async function loadAdmin() {
   const [aggregates, stack, pending] = await Promise.all([supabase.from('choir_attendance_aggregate').select('*').order('name'), supabase.from('choir_attendance_stack').select('*').order('datefilled', { ascending: false }).limit(300), supabase.from('choir_profiles').select('id,full_name,email,phone_num').eq('status', 'pending').order('created_at')]);
