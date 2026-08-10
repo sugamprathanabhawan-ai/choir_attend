@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 
 const config = window.CHOIRPORTAL_CONFIG;
 if (!config?.url || config.url.includes('YOUR_PROJECT') || !config?.anonKey) {
-  document.body.innerHTML = '<main class="p-8 font-sans"><h1 class="text-2xl font-bold">Supabase setup needed</h1><p class="mt-3">Add your Supabase project URL and anonymous key in index.html before publishing.</p></main>';
+  document.body.innerHTML = '<main class="p-8 font-sans"><h1 class="text-2xl font-bold">Supabase setup needed</h1><p class="mt-3">Add your Supabase project URL and anonymous key in js/config.js before publishing.</p></main>';
   throw new Error('Supabase configuration is missing.');
 }
 const supabase = createClient(config.url, config.anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
@@ -34,11 +34,9 @@ function attendanceResultMessage(record) {
 document.querySelectorAll('[data-auth-tab]').forEach(button => button.addEventListener('click', () => showAuth(button.dataset.authTab)));
 function showAuth(tab) { document.querySelectorAll('.auth-form').forEach(el => el.classList.add('hidden')); $(`${tab}Form`).classList.remove('hidden'); document.querySelectorAll('.auth-tab').forEach(el => el.classList.toggle('bg-white', el.dataset.authTab === tab)); }
 showAuth('login');
-document.querySelectorAll('h2').forEach(heading => { if (heading.textContent.trim() === 'My statistics') heading.textContent = 'Statistics'; });
-document.querySelectorAll('th').forEach(heading => { if (heading.textContent.trim() === 'Time & date') heading.remove(); });
 const homePill = document.createElement('a'); homePill.href = 'https://sugamchurch.vercel.app/'; homePill.textContent = 'Home'; homePill.className = 'rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-ink hover:bg-slate-200'; const topNavActions = document.querySelector('nav .flex.items-center.gap-3'); if (topNavActions) topNavActions.prepend(homePill);
 const authHomePill = homePill.cloneNode(true); authHomePill.className = 'absolute left-5 top-5 z-10 rounded-full bg-ink px-4 py-2 text-sm font-bold text-white shadow hover:bg-slate-700'; const authView = $('authView'); authView.classList.add('relative'); authView.prepend(authHomePill);
-const loginProgress = document.createElement('div'); loginProgress.id = 'loginProgress'; loginProgress.className = 'hidden rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-900'; loginProgress.innerHTML = '<div class="flex items-center justify-between"><span>Jesus loves you</span><span>...</span></div><div class="mt-2 h-2 overflow-hidden rounded-full bg-amber-100"><div class="login-progress-bar h-full w-1/3 rounded-full bg-gold"></div></div>'; $('loginForm').append(loginProgress);
+const loginProgress = document.createElement('div'); loginProgress.id = 'loginProgress'; loginProgress.className = 'login-loader hidden rounded-2xl border border-sky-200 p-4 text-sm text-ink shadow-inner'; loginProgress.innerHTML = '<div class="flex items-center gap-3"><div class="login-loader-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-ink text-lg text-gold shadow-lg"><i class="fa-solid fa-heart"></i></div><div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-3"><p class="font-black tracking-wide">Jesus loves you</p><span class="flex gap-1 text-gold"><i class="login-loader-dot fa-solid fa-circle text-[6px]"></i><i class="login-loader-dot fa-solid fa-circle text-[6px]"></i><i class="login-loader-dot fa-solid fa-circle text-[6px]"></i></span></div><p class="mt-0.5 text-xs font-medium text-slate-500">Preparing your choir space</p></div></div><div class="mt-3 h-2 overflow-hidden rounded-full bg-white/90 shadow-inner"><div class="login-progress-bar h-full w-1/3 rounded-full bg-gradient-to-r from-sky-400 via-gold to-sky-400"></div></div>'; $('loginForm').append(loginProgress);
 
 async function compressImage(file) {
   if (!file) throw new Error('Please choose a photo.');
@@ -67,7 +65,14 @@ async function compressImage(file) {
   }
   throw new Error('The photo could not be compressed below 10 KB. Please take a simpler, well-lit photo.');
 }
-function savePendingSelfie(blob) { const reader = new FileReader(); reader.onload = () => sessionStorage.setItem('choir_pending_selfie', reader.result); reader.readAsDataURL(blob); }
+function savePendingSelfie(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => { sessionStorage.setItem('choir_pending_selfie', reader.result); resolve(); };
+    reader.onerror = () => reject(new Error('The selfie could not be prepared for upload.'));
+    reader.readAsDataURL(blob);
+  });
+}
 async function uploadPendingSelfie() {
   const encoded = sessionStorage.getItem('choir_pending_selfie'); if (!encoded || !user) return;
   const blob = await (await fetch(encoded)).blob(); const path = `${user.id}/selfie.jpg`;
@@ -83,21 +88,23 @@ $('signupForm').addEventListener('submit', async event => {
   if (!/^9\d{9}$/.test(phone)) return toast('Use a valid 10-digit Nepali phone number beginning with 9.', 'error');
   if (!symbol) return toast('Please choose a symbol.', 'error');
   if (!compressedSelfie) return toast('Please add a selfie; it will be compressed to a 10 KB JPG.', 'error');
-  try { event.submitter.disabled = true; const { data: available, error: availabilityError } = await supabase.rpc('choir_symbol_available', { p_symbol: symbol }); if (availabilityError) throw availabilityError; if (!available) return toast('That symbol is already in use. Please choose another.', 'error'); savePendingSelfie(compressedSelfie); const { error } = await supabase.auth.signUp({ email, password: symbol, options: { data: { full_name: name, phone_num: phone, symbolnum: symbol, accepted_laws: true } } }); if (error) throw error; toast('Account created. You can log in with your symbol.'); showAuth('login'); $('loginEmail').value = email; $('loginSymbol').value = ''; }
+  try { event.submitter.disabled = true; const { data: available, error: availabilityError } = await supabase.rpc('choir_symbol_available', { p_symbol: symbol }); if (availabilityError) throw availabilityError; if (!available) return toast('That symbol is already in use. Please choose another.', 'error'); await savePendingSelfie(compressedSelfie); const { error } = await supabase.auth.signUp({ email, password: symbol, options: { data: { full_name: name, phone_num: phone, symbolnum: symbol, accepted_laws: true } } }); if (error) throw error; toast('Account created. Log in with your email and symbol number.'); showAuth('login'); $('loginEmail').value = email; $('loginSymbol').value = symbol; }
   catch (error) { toast(error.message || 'Could not create the account.', 'error'); }
   finally { event.submitter.disabled = false; }
 });
-$('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = event.submitter; button.disabled = true; loginProgress.classList.remove('hidden'); const { error } = await supabase.auth.signInWithPassword({ email: $('loginEmail').value.trim(), password: $('loginSymbol').value }); if (error) { loginProgress.classList.add('hidden'); button.disabled = false; return toast(error.message === 'Invalid login credentials' ? 'Account and symbol do not match.' : error.message, 'error'); } await boot(); loginProgress.classList.add('hidden'); button.disabled = false; });
+$('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = event.submitter; const email = $('loginEmail').value.trim(); const symbol = $('loginSymbol').value; button.disabled = true; loginProgress.classList.remove('hidden'); try { const { error } = await supabase.auth.signInWithPassword({ email, password: symbol }); if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email and symbol number do not match.' : error.message); await boot(); } catch (error) { toast(error.message || 'Could not log in.', 'error'); } finally { loginProgress.classList.add('hidden'); button.disabled = false; } });
 
 function startClock() { const render = () => text('nepalClock', new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format()); render(); setInterval(render, 1000); }
 async function signedSelfie() {
   const storedPath = profile?.selfie_path?.trim();
-  if (!storedPath || !user) return;
+  if (!user) return;
 
-  // Older profile rows saved only "selfie.jpg". Storage objects are scoped to
-  // their owner, so prefer the current user's folder while retaining a fallback
-  // for any legacy object that was stored with its full path.
-  const paths = storedPath.includes('/') ? [storedPath] : [`${user.id}/${storedPath}`, storedPath];
+  // Prefer the saved path, but also try the standard file path. This lets a
+  // selfie render even while an older profile row is waiting for its path update.
+  const paths = [...new Set([
+    ...(storedPath ? (storedPath.includes('/') ? [storedPath] : [`${user.id}/${storedPath}`, storedPath]) : []),
+    `${user.id}/selfie.jpg`
+  ])];
   for (const path of paths) {
     const { data, error } = await supabase.storage.from('choir-selfies').createSignedUrl(path, 3600);
     if (!error && data?.signedUrl) {
@@ -106,11 +113,13 @@ async function signedSelfie() {
       return;
     }
   }
-  toast('Your selfie could not be loaded. Please upload it again.', 'error');
+  // A newly created profile can briefly exist before its storage object is available.
+  // Keep the neutral avatar instead of showing an alarming error.
+  $('navSelfie').src = `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.full_name || 'Member')}&background=e0f2fe&color=0c4a6e&bold=true`;
 }
 async function boot() {
   const { data: { user: activeUser } } = await supabase.auth.getUser(); if (!activeUser) return;
-  user = activeUser; try { await uploadPendingSelfie(); } catch (error) { toast(`Selfie upload: ${error.message}`, 'error'); }
+  user = activeUser; try { await uploadPendingSelfie(); } catch (error) { console.warn('Selfie upload will retry automatically on the next sign-in.', error); }
   const [{ data: nextProfile, error: profileError }, { data: nextSettings, error: settingsError }] = await Promise.all([
     supabase.from('choir_profiles').select('*').eq('id', user.id).single(), supabase.from('choir_settings').select('*').eq('id', 1).single()
   ]); if (profileError || settingsError) return toast((profileError || settingsError).message, 'error'); profile = nextProfile; settings = nextSettings;
