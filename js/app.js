@@ -103,7 +103,7 @@ $('signupForm').addEventListener('submit', async event => {
   catch (error) { toast(error.message || 'Could not create the account.', 'error'); }
   finally { button.disabled = false; }
 });
-$('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = submitButton(event.currentTarget); const email = $('loginEmail').value.trim(); const symbol = $('loginSymbol').value; button.disabled = true; loginProgress.classList.remove('hidden'); try { await withLoader('Signing you in', 'Preparing your choir space', async () => { const { error } = await supabase.auth.signInWithPassword({ email, password: symbol }); if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email and symbol number do not match.' : error.message); await boot(); }); } catch (error) { toast(error.message || 'Could not log in.', 'error'); } finally { loginProgress.classList.add('hidden'); button.disabled = false; } });
+$('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = submitButton(event.currentTarget); const email = $('loginEmail').value.trim(); const symbol = $('loginSymbol').value; button.disabled = true; loginProgress.classList.remove('hidden'); try { await withLoader('Signing you in', 'Opening your choir space', async () => { const { data, error } = await supabase.auth.signInWithPassword({ email, password: symbol }); if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email and symbol number do not match.' : error.message); await boot(data.user); }); } catch (error) { toast(error.message || 'Could not log in.', 'error'); } finally { loginProgress.classList.add('hidden'); button.disabled = false; } });
 
 function startClock() { const render = () => text('nepalClock', new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format()); render(); setInterval(render, 1000); }
 async function signedSelfie() {
@@ -128,14 +128,20 @@ async function signedSelfie() {
   // Keep the neutral avatar instead of showing an alarming error.
   $('navSelfie').src = `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.full_name || 'Member')}&background=e0f2fe&color=0c4a6e&bold=true`;
 }
-async function boot() {
-  const { data: { user: activeUser } } = await supabase.auth.getUser(); if (!activeUser) return;
-  user = activeUser; try { await uploadPendingSelfie(); } catch (error) { console.warn('Selfie upload will retry automatically on the next sign-in.', error); }
+async function boot(activeUser) {
+  if (!activeUser) { const { data } = await supabase.auth.getUser(); activeUser = data.user; }
+  if (!activeUser) return;
+  user = activeUser;
   const [{ data: nextProfile, error: profileError }, { data: nextSettings, error: settingsError }] = await Promise.all([
     supabase.from('choir_profiles').select('*').eq('id', user.id).single(), supabase.from('choir_settings').select('*').eq('id', 1).single()
   ]); if (profileError || settingsError) return toast((profileError || settingsError).message, 'error'); profile = nextProfile; settings = nextSettings;
-  $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); text('navEmail', profile.email); text('navName', profile.full_name); text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`); signedSelfie(); startClock();
-  if (profile.status !== 'approved') $('pendingPanel').classList.remove('hidden'); await loadMember(); if (isAdmin()) { $('adminPanel').classList.remove('hidden'); await loadAdmin(); }
+  $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); text('navEmail', profile.email); text('navName', profile.full_name); text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`); startClock();
+  if (profile.status !== 'approved') $('pendingPanel').classList.remove('hidden');
+  // The portal is ready now. Load non-essential data without holding up sign-in.
+  void signedSelfie();
+  void uploadPendingSelfie().then(() => signedSelfie()).catch(error => console.warn('Selfie upload will retry automatically on the next sign-in.', error));
+  void loadMember();
+  if (isAdmin()) { $('adminPanel').classList.remove('hidden'); void loadAdmin(); }
 }
 async function loadMember() {
   text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
@@ -186,5 +192,5 @@ $('pendingRows').addEventListener('click', async event => { const approve = even
 $('lawForm').addEventListener('submit', async event => { event.preventDefault(); const symbol = $('lawSymbol').value.trim(); try { await withLoader('Saving personal law', 'Updating member guidance', async () => { const { data: member, error } = await supabase.from('choir_profiles').select('id').eq('symbolnum', symbol).single(); if (error) throw new Error('No member was found for that symbol.'); const { error: saveError } = await supabase.from('choir_personal_laws').upsert({ user_id: member.id, personal_law: $('lawText').value.trim() }, { onConflict: 'user_id' }); if (saveError) throw saveError; }); event.target.reset(); toast('Personal law saved.'); } catch (error) { toast(error.message || 'Could not save personal law.', 'error'); } });
 $('settingsForm').addEventListener('submit', async event => { event.preventDefault(); const month = $('settingMonth').value.trim(); const days = Number($('settingDays').value); try { await withLoader('Saving month settings', 'Refreshing the monthly totals', async () => { const { error } = await supabase.rpc('choir_admin_set_settings', { p_month: month, p_working_days: days }); if (error) throw error; settings.month_name = month; settings.working_days = days; await loadMember(); await loadAdmin(); }); toast('Month settings saved; aggregate table refreshed.'); } catch (error) { toast(error.message || 'Could not save month settings.', 'error'); } });
 $('csvExport').addEventListener('click', async () => { try { await withLoader('Preparing CSV', 'Collecting the active month attendance data', async () => { const { data, error } = await supabase.from('choir_attendance_stack').select('symbol,datefilled,month_name,name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status').eq('month_name', settings.month_name).order('datefilled'); if (error) throw error; const headers = ['Symbol','Datefilled','Month','Name','Reason','Time filled','Point','Holiday used','Attendance on time','Status']; const csv = [headers, ...data.map(Object.values)].map(row => row.map(v => `"${String(v ?? '').replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); link.download = `${settings.month_name}-choir-attendance.csv`; link.click(); URL.revokeObjectURL(link.href); }); } catch (error) { toast(error.message || 'Could not prepare the CSV.', 'error'); } });
-$('logoutBtn').addEventListener('click', async () => { try { await withLoader('Signing you out', 'Closing your secure session', () => supabase.auth.signOut()); location.reload(); } catch (error) { toast(error.message || 'Could not sign out.', 'error'); } });
+$('logoutBtn').addEventListener('click', async () => { try { showLoader('Signing you out', 'Closing your secure session'); await supabase.auth.signOut({ scope: 'local' }); location.replace(location.pathname); } catch (error) { hideLoader(); toast(error.message || 'Could not sign out.', 'error'); } });
 supabase.auth.getSession().then(async ({ data }) => { if (data.session) await withLoader('Opening your portal', 'Loading your choir account', boot); });
