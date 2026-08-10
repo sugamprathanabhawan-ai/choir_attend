@@ -62,12 +62,14 @@
     <nav id="navbar" class="w-full bg-white transition-all duration-300 py-3 px-6 md:px-12 border-b border-primary-100">
       <div class="max-w-7xl mx-auto flex justify-between items-center">
         <a href="index.html" class="flex items-center gap-3 text-primary-900 z-50 group">
-          <img src="images/logos.webp" alt="Sugam Prathana Bhawan Logo" class="w-10 h-10 rounded-full object-cover shadow-md" onerror="this.src='https://via.placeholder.com/40'"/>
+          <span aria-hidden="true" class="flex h-10 w-10 items-center justify-center rounded-full bg-primary-900 text-lg text-white shadow-md"><i class="fa-solid fa-church"></i></span>
           <span class="font-semibold text-lg md:text-xl tracking-wide">Sugam Prathana Bhawan</span>
         </a>
         
         <div class="hidden md:flex items-center space-x-8 text-primary-900 font-medium">
-          <a href="https://sugamchurch.vercel.app/index.html" class="hover:text-primary-600 transition">Home</a>
+          <a href="https://sugamchurch.vercel.app/" class="hover:text-primary-600 transition">Church home</a>
+          <a href="index.html" class="hover:text-primary-600 transition">Attendance</a>
+          <a href="MemHistory.html" class="text-primary-600 font-bold transition">Members</a>
         </div>
 
         <button id="mobile-menu-btn" class="md:hidden text-primary-900 text-2xl z-50 focus:outline-none">
@@ -77,12 +79,9 @@
       
       <!-- Mobile Menu -->
       <div id="mobile-menu" class="fixed inset-0 bg-white/95 backdrop-blur-md flex flex-col justify-center items-center gap-6 text-xl font-medium translate-x-full transition-transform duration-300 z-40">
-        <a href="index.html" class="mobile-link text-gray-800 hover:text-primary-500">Home</a>
-        <a href="youthroutine.html" class="mobile-link text-gray-800 hover:text-primary-500">Youth</a>
-        <a href="choir.html" class="mobile-link text-gray-800 hover:text-primary-500">Choir</a>
+        <a href="https://sugamchurch.vercel.app/" class="mobile-link text-gray-800 hover:text-primary-500">Church home</a>
+        <a href="index.html" class="mobile-link text-gray-800 hover:text-primary-500">Attendance</a>
         <a href="MemHistory.html" class="mobile-link text-primary-600 font-bold">Members</a>
-        <a href="calender.html" class="mobile-link text-gray-800 hover:text-primary-500">Calendar</a>
-        <a href="laws.html" class="mobile-link text-gray-800 hover:text-primary-500">Laws</a>
       </div>
     </nav>
   </header>
@@ -143,6 +142,7 @@
         <table class="w-full text-left text-sm">
           <thead class="bg-primary-50 text-primary-900 font-bold text-xs uppercase border-b border-primary-100">
             <tr>
+              <th class="p-4">Profile Pic</th>
               <th class="p-4">Name</th>
               <th class="p-4">Service Time</th>
               <th class="p-4">Status</th>
@@ -150,7 +150,7 @@
           </thead>
           <tbody id="pastMembersBody" class="divide-y divide-gray-100">
             <tr>
-              <td colspan="3" class="p-6 text-center text-gray-400">
+              <td colspan="4" class="p-6 text-center text-gray-400">
                 <i class="fa-solid fa-spinner animate-spin mr-2"></i> Loading past members...
               </td>
             </tr>
@@ -209,7 +209,7 @@
 
         if (!supabaseClient) {
           currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
-          pastBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
+          pastBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
           return;
         }
 
@@ -224,12 +224,24 @@
           if (currentError) throw currentError;
 
           if (currentMembers && currentMembers.length > 0) {
-            const currentMembersWithPhotos = await Promise.all(currentMembers.map(async member => {
-              if (!member.selfie_path) return { ...member, profilePicUrl: null };
-              const { data } = await supabaseClient.storage
-                .from('choir-selfies')
-                .createSignedUrl(member.selfie_path, 3600);
-              return { ...member, profilePicUrl: data?.signedUrl || null };
+            // Request every signed selfie URL at once instead of making a
+            // separate network request for each member.
+            const photoPathFor = member => {
+              const savedPath = member.selfie_path?.trim();
+              if (!savedPath) return `${member.user_id}/selfie.jpg`;
+              return savedPath.includes('/') ? savedPath : `${member.user_id}/${savedPath}`;
+            };
+            const photoPaths = [...new Set(currentMembers.map(photoPathFor))];
+            const { data: signedPhotos, error: photoError } = await supabaseClient.storage
+              .from('choir-selfies')
+              .createSignedUrls(photoPaths, 3600);
+            if (photoError) console.warn('Profile photos could not be signed:', photoError.message);
+            const photoUrlByPath = new Map((signedPhotos || [])
+              .filter(photo => photo.signedUrl)
+              .map(photo => [photo.path, photo.signedUrl]));
+            const currentMembersWithPhotos = currentMembers.map(member => ({
+              ...member,
+              profilePicUrl: photoUrlByPath.get(photoPathFor(member)) || null
             }));
             document.getElementById('currentCount').textContent = `${currentMembersWithPhotos.length} Active`;
             currentBody.innerHTML = currentMembersWithPhotos.map(m => `
@@ -238,7 +250,7 @@
                   <img src="${m.profilePicUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name || 'Member')}&background=e0f2fe&color=0c4a6e&bold=true`}" 
                        alt="${escapeHtml(m.name || 'Member')}" 
                        class="w-10 h-10 rounded-full object-cover border border-primary-200"
-                       onerror="this.src='https://via.placeholder.com/40';">
+                       onerror="this.src='https://ui-avatars.com/api/?name=Member&amp;background=e0f2fe&amp;color=0c4a6e&amp;bold=true';">
                 </td>
                 <td class="p-4 font-semibold text-gray-900">${escapeHtml(m.name || 'N/A')}</td>
                 <td class="p-4">
@@ -267,7 +279,7 @@
         } catch (err) {
           console.error("Supabase load error:", err);
           currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
-          pastBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
+          pastBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
         }
       }
 
@@ -275,6 +287,12 @@
         if (data && data.length > 0) {
           container.innerHTML = data.map(m => `
             <tr class="hover:bg-primary-50/50 transition">
+              <td class="p-4">
+                <img src="${escapeHtml(m.profile_pic_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name || 'Member')}&background=e0f2fe&color=0c4a6e&bold=true`)}"
+                     alt="${escapeHtml(m.name || 'Member')} profile picture"
+                     class="w-10 h-10 rounded-full object-cover border border-primary-200 bg-primary-50"
+                     onerror="this.src='https://ui-avatars.com/api/?name=Member&amp;background=e0f2fe&amp;color=0c4a6e&amp;bold=true';">
+              </td>
               <td class="p-4 font-semibold text-gray-900">${escapeHtml(m.name || 'N/A')}</td>
               <td class="p-4 text-gray-600">${escapeHtml(m.service_time || m.details || 'N/A')}</td>
               <td class="p-4">
@@ -285,7 +303,7 @@
             </tr>
           `).join('');
         } else {
-          container.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">No past member records found.</td></tr>`;
+          container.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">No past member records found.</td></tr>`;
         }
       }
 
