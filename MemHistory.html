@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sugam Prathana Bhawan - Choir & Church Member History">
+  <title>Member History | Sugam Prathana Bhawan</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#87ceeb', // Light Sky Blue
+              600: '#38bdf8',
+              900: '#0c4a6e', // Dark Blue
+            }
+          },
+          fontFamily: {
+            sans: ['Poppins', 'sans-serif'],
+            serif: ['Playfair Display', 'serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Supabase JS Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="font-sans text-gray-800 bg-primary-50 antialiased min-h-screen flex flex-col justify-between">
+
+  <!-- Header & Navigation Bar -->
+  <header id="main-header" class="sticky top-0 z-40 w-full flex flex-col shadow-sm">
+    <!-- Quick Nav Bar -->
+    <div id="quick-nav" class="bg-primary-900 text-white py-1.5 px-6 md:px-12 flex justify-end gap-6 text-xs md:text-sm border-b border-primary-600/30">
+      <a href="https://www.wordproject.org/bibles/ne/" target="_blank" class="hover:text-primary-500 transition-colors flex items-center gap-2 font-medium">
+        <i class="fa-solid fa-book-bible"></i> Bible
+      </a>
+      <a href="https://nepalichristiansongs.com/" target="_blank" class="hover:text-primary-500 transition-colors flex items-center gap-2 font-medium">
+        <i class="fa-solid fa-music"></i> Bhajan
+      </a>
+      <a href="index.html" class="hover:text-primary-500 transition-colors flex items-center gap-2 font-medium">
+        <i class="fa-solid fa-clipboard-check"></i> Attendance
+      </a>
+    </div>
+
+    <!-- Main Navigation -->
+    <nav id="navbar" class="w-full bg-white transition-all duration-300 py-3 px-6 md:px-12 border-b border-primary-100">
+      <div class="max-w-7xl mx-auto flex justify-between items-center">
+        <a href="index.html" class="flex items-center gap-3 text-primary-900 z-50 group">
+          <img src="images/logos.webp" alt="Sugam Prathana Bhawan Logo" class="w-10 h-10 rounded-full object-cover shadow-md" onerror="this.src='https://via.placeholder.com/40'"/>
+          <span class="font-semibold text-lg md:text-xl tracking-wide">Sugam Prathana Bhawan</span>
+        </a>
+        
+        <div class="hidden md:flex items-center space-x-8 text-primary-900 font-medium">
+          <a href="index.html" class="hover:text-primary-600 transition">Home</a>
+          <a href="youthroutine.html" class="hover:text-primary-600 transition">Youth</a>
+          <a href="choir.html" class="hover:text-primary-600 transition">Choir</a>
+          <a href="calender.html" class="hover:text-primary-600 transition">Calendar</a>
+          <a href="laws.html" class="hover:text-primary-600 transition">Laws</a>
+          <a href="index.html#contact" class="px-6 py-2 bg-primary-500 text-white rounded-full hover:bg-primary-600 hover:shadow-lg transition transform hover:-translate-y-0.5">Visit Us</a>
+        </div>
+
+        <button id="mobile-menu-btn" class="md:hidden text-primary-900 text-2xl z-50 focus:outline-none">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+      </div>
+      
+      <!-- Mobile Menu -->
+      <div id="mobile-menu" class="fixed inset-0 bg-white/95 backdrop-blur-md flex flex-col justify-center items-center gap-6 text-xl font-medium translate-x-full transition-transform duration-300 z-40">
+        <a href="index.html" class="mobile-link text-gray-800 hover:text-primary-500">Home</a>
+        <a href="youthroutine.html" class="mobile-link text-gray-800 hover:text-primary-500">Youth</a>
+        <a href="choir.html" class="mobile-link text-gray-800 hover:text-primary-500">Choir</a>
+        <a href="MemHistory.html" class="mobile-link text-primary-600 font-bold">Members</a>
+        <a href="calender.html" class="mobile-link text-gray-800 hover:text-primary-500">Calendar</a>
+        <a href="laws.html" class="mobile-link text-gray-800 hover:text-primary-500">Laws</a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Page Header -->
+  <section class="bg-primary-900 text-white py-12 px-6">
+    <div class="max-w-7xl mx-auto text-center">
+      <span class="text-primary-500 font-semibold tracking-widest uppercase text-xs">Sugam Church Community</span>
+      <h1 class="text-3xl md:text-5xl font-serif font-bold mt-2">Member History</h1>
+      <p class="mt-3 text-primary-100 text-sm md:text-base max-w-2xl mx-auto">Honoring our active community members and celebrating the legacy of past members who served with us.</p>
+    </div>
+  </section>
+
+  <!-- Content Section -->
+  <main class="max-w-7xl mx-auto px-6 py-12 w-full space-y-12">
+
+    <!-- Current Members Section -->
+    <section class="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-primary-100">
+      <div class="flex items-center justify-between mb-6 border-b border-primary-100 pb-4">
+        <div>
+          <h2 class="text-2xl font-serif font-bold text-primary-900">Current Members</h2>
+          <p class="text-xs md:text-sm text-gray-500 mt-1">Active participants in Sugam Church ministries and choir.</p>
+        </div>
+        <span id="currentCount" class="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">Active</span>
+      </div>
+
+      <div class="overflow-x-auto rounded-2xl border border-primary-100">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-primary-50 text-primary-900 font-bold text-xs uppercase border-b border-primary-100">
+            <tr>
+              <th class="p-4">Profile Pic</th>
+              <th class="p-4">Name</th>
+              <th class="p-4">Status</th>
+            </tr>
+          </thead>
+          <tbody id="currentMembersBody" class="divide-y divide-gray-100">
+            <tr>
+              <td colspan="3" class="p-6 text-center text-gray-400">
+                <i class="fa-solid fa-spinner animate-spin mr-2"></i> Loading current members...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Past Members Section -->
+    <section class="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-primary-100">
+      <div class="flex items-center justify-between mb-6 border-b border-primary-100 pb-4">
+        <div>
+          <h2 class="text-2xl font-serif font-bold text-primary-900">Past Members</h2>
+          <p class="text-xs md:text-sm text-gray-500 mt-1">Former members and their time of service in the ministry.</p>
+        </div>
+        <span id="pastCount" class="bg-gray-100 text-gray-700 text-xs font-bold px-3 py-1 rounded-full">Inactive</span>
+      </div>
+
+      <div class="overflow-x-auto rounded-2xl border border-primary-100">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-primary-50 text-primary-900 font-bold text-xs uppercase border-b border-primary-100">
+            <tr>
+              <th class="p-4">Name</th>
+              <th class="p-4">Service Time</th>
+              <th class="p-4">Status</th>
+            </tr>
+          </thead>
+          <tbody id="pastMembersBody" class="divide-y divide-gray-100">
+            <tr>
+              <td colspan="3" class="p-6 text-center text-gray-400">
+                <i class="fa-solid fa-spinner animate-spin mr-2"></i> Loading past members...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-primary-900 text-white py-6 mt-12">
+    <div class="max-w-7xl mx-auto px-4 text-center">
+      <p class="text-sm text-gray-300">
+        &copy; <span id="year"></span> Sugam Prathana Bhawan. All rights reserved.
+      </p>
+      <p class="mt-1 text-xs text-primary-500">
+        Made with <i class="fa-solid fa-heart text-red-500"></i> for the glory of God.
+      </p>
+    </div>
+  </footer>
+
+  <!-- App Configuration & Fetch Logic -->
+  <script src="./js/config.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Set Year
+      document.getElementById('year').textContent = new Date().getFullYear();
+
+      // Mobile Menu Toggle
+      const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+      const mobileMenu = document.getElementById('mobile-menu');
+      if (mobileMenuBtn && mobileMenu) {
+        mobileMenuBtn.addEventListener('click', () => {
+          mobileMenu.classList.toggle('translate-x-full');
+          mobileMenuBtn.innerHTML = mobileMenu.classList.contains('translate-x-full') 
+            ? '<i class="fa-solid fa-bars"></i>' 
+            : '<i class="fa-solid fa-xmark text-gray-800"></i>';
+        });
+      }
+
+      // Initialize Supabase Client
+      const supabaseUrl = window.CHOIRPORTAL_CONFIG?.url;
+      const supabaseKey = window.CHOIRPORTAL_CONFIG?.anonKey;
+      
+      let supabaseClient;
+      if (supabaseUrl && supabaseKey && typeof supabase !== 'undefined' && supabase.createClient) {
+        supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+      }
+      const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+
+      // Fetch and render data
+      async function loadMembers() {
+        const currentBody = document.getElementById('currentMembersBody');
+        const pastBody = document.getElementById('pastMembersBody');
+
+        if (!supabaseClient) {
+          currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
+          pastBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
+          return;
+        }
+
+        try {
+          // Current members are sourced from choir_attendance_aggregate through
+          // a public view that intentionally excludes email and phone details.
+          const { data: currentMembers, error: currentError } = await supabaseClient
+            .from('choir_member_history_current')
+            .select('user_id, name, selfie_path')
+            .order('name');
+
+          if (currentError) throw currentError;
+
+          if (currentMembers && currentMembers.length > 0) {
+            const currentMembersWithPhotos = await Promise.all(currentMembers.map(async member => {
+              if (!member.selfie_path) return { ...member, profilePicUrl: null };
+              const { data } = await supabaseClient.storage
+                .from('choir-selfies')
+                .createSignedUrl(member.selfie_path, 3600);
+              return { ...member, profilePicUrl: data?.signedUrl || null };
+            }));
+            document.getElementById('currentCount').textContent = `${currentMembersWithPhotos.length} Active`;
+            currentBody.innerHTML = currentMembersWithPhotos.map(m => `
+              <tr class="hover:bg-primary-50/50 transition">
+                <td class="p-4">
+                  <img src="${m.profilePicUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name || 'Member')}&background=e0f2fe&color=0c4a6e&bold=true`}" 
+                       alt="${escapeHtml(m.name || 'Member')}" 
+                       class="w-10 h-10 rounded-full object-cover border border-primary-200"
+                       onerror="this.src='https://via.placeholder.com/40';">
+                </td>
+                <td class="p-4 font-semibold text-gray-900">${escapeHtml(m.name || 'N/A')}</td>
+                <td class="p-4">
+                  <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Active
+                  </span>
+                </td>
+              </tr>
+            `).join('');
+          } else {
+            document.getElementById('currentCount').textContent = '0 Active';
+            currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">No active members found.</td></tr>`;
+          }
+
+          // Past-member details are stored in the dedicated past_members table.
+          const { data: pastMembers, error: pastError } = await supabaseClient
+            .from('past_members')
+            .select('name, service_time, profile_pic_url, details')
+            .order('display_order')
+            .order('name');
+
+          if (pastError) throw pastError;
+          document.getElementById('pastCount').textContent = `${pastMembers?.length || 0} Past`;
+          renderPastMembers(pastMembers || [], pastBody);
+
+        } catch (err) {
+          console.error("Supabase load error:", err);
+          currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
+          pastBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
+        }
+      }
+
+      function renderPastMembers(data, container) {
+        if (data && data.length > 0) {
+          container.innerHTML = data.map(m => `
+            <tr class="hover:bg-primary-50/50 transition">
+              <td class="p-4 font-semibold text-gray-900">${escapeHtml(m.name || 'N/A')}</td>
+              <td class="p-4 text-gray-600">${escapeHtml(m.service_time || m.details || 'N/A')}</td>
+              <td class="p-4">
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gray-100 text-gray-600">
+                  <span class="w-2 h-2 rounded-full bg-gray-400"></span> Inactive
+                </span>
+              </td>
+            </tr>
+          `).join('');
+        } else {
+          container.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">No past member records found.</td></tr>`;
+        }
+      }
+
+      loadMembers();
+    });
+  </script>
+</body>
+</html>
