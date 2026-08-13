@@ -101,6 +101,25 @@ $('signupSelfie').addEventListener('change', event => {
   button.disabled = true;
   selfiePreparation.catch(error => { event.target.value = ''; toast(error.message, 'error'); }).finally(() => { selfiePreparation = null; button.disabled = false; });
 });
+$('profilePictureInput').addEventListener('change', async event => {
+  const input = event.target;
+  if (!input.files?.[0] || !user) return;
+  input.disabled = true;
+  try {
+    await withLoader('Updating your profile picture', 'Compressing and saving your new photo', async () => {
+      const photo = await compressImage(input.files[0]);
+      const path = `${user.id}/selfie.jpg`;
+      const { error: uploadError } = await supabase.storage.from('choir-selfies').upload(path, photo, { upsert: true, contentType: 'image/jpeg' });
+      if (uploadError) throw uploadError;
+      const { error: profileError } = await supabase.rpc('choir_save_selfie', { p_path: path });
+      if (profileError) throw profileError;
+      profile.selfie_path = path;
+      await signedSelfie();
+    });
+    toast('Your profile picture has been updated.');
+  } catch (error) { toast(error.message || 'Could not update your profile picture.', 'error'); }
+  finally { input.value = ''; input.disabled = false; }
+});
 $('signupForm').addEventListener('submit', async event => {
   event.preventDefault(); const name = $('signupName').value.trim(); const phone = $('signupPhone').value.trim(); const email = $('signupEmail').value.trim(); const symbol = $('signupSymbol').value.trim();
   if (!/^9\d{9}$/.test(phone)) return toast('Use a valid 10-digit Nepali phone number beginning with 9.', 'error');
