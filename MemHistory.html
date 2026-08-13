@@ -115,12 +115,11 @@
               <th class="p-4">Profile Pic</th>
               <th class="p-4">Name</th>
               <th class="p-4">Status</th>
-              <th class="p-4">Update Pic</th>
             </tr>
           </thead>
           <tbody id="currentMembersBody" class="divide-y divide-gray-100">
             <tr>
-              <td colspan="4" class="p-6 text-center text-gray-400">
+              <td colspan="3" class="p-6 text-center text-gray-400">
                 <i class="fa-solid fa-spinner animate-spin mr-2"></i> Loading current members...
               </td>
             </tr>
@@ -202,47 +201,18 @@
         supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
       }
       const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
-      let signedInUser = null;
-
-      async function compressProfilePhoto(file) {
-        if (!file) throw new Error('Please choose a photo.');
-        let source = file;
-        if (/\.hei[cf]$/i.test(file.name) || /image\/hei[cf]/i.test(file.type)) {
-          const { default: heic2any } = await import('https://cdn.jsdelivr.net/npm/heic2any@0.0.4/+esm');
-          source = await heic2any({ blob: file, toType: 'image/jpeg', quality: .9 });
-          if (Array.isArray(source)) source = source[0];
-        }
-        let image;
-        try { image = await createImageBitmap(source); }
-        catch {
-          const url = URL.createObjectURL(source);
-          image = await new Promise((resolve, reject) => { const preview = new Image(); preview.onload = () => { URL.revokeObjectURL(url); resolve(preview); }; preview.onerror = () => reject(new Error('The photo could not be read.')); preview.src = url; });
-        }
-        let width = Math.min(image.width, 400), height = Math.round(image.height * width / image.width), quality = .76;
-        for (let pass = 0; pass < 10; pass++) {
-          const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-          canvas.getContext('2d').drawImage(image, 0, 0, width, height);
-          const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
-          if (blob && blob.size <= 10 * 1024) return blob;
-          width = Math.round(width * .78); height = Math.round(height * .78); quality = Math.max(.25, quality - .07);
-        }
-        throw new Error('The photo could not be compressed below 10 KB. Please choose a simpler photo.');
-      }
-
       // Fetch and render data
       async function loadMembers() {
         const currentBody = document.getElementById('currentMembersBody');
         const pastBody = document.getElementById('pastMembersBody');
 
         if (!supabaseClient) {
-          currentBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
+          currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
           pastBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Supabase config missing. Please verify config.js</td></tr>`;
           return;
         }
 
         try {
-          const { data: { user } } = await supabaseClient.auth.getUser();
-          signedInUser = user;
           // Current members are sourced from choir_attendance_aggregate through
           // a public view that intentionally excludes email and phone details.
           const { data: currentMembers, error: currentError } = await supabaseClient
@@ -287,14 +257,11 @@
                     <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Active
                   </span>
                 </td>
-                <td class="p-4">
-                  ${signedInUser?.id === m.user_id ? `<label class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary-900 px-3 py-2 text-xs font-bold text-white hover:bg-primary-600"><i class="fa-solid fa-image"></i> Choose photo<input class="sr-only profile-photo-input" data-member-id="${escapeHtml(m.user_id)}" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif"></label>` : '<span class="text-xs text-gray-400">Your account only</span>'}
-                </td>
               </tr>
             `).join('');
           } else {
             document.getElementById('currentCount').textContent = '0 Active';
-            currentBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">No active members found.</td></tr>`;
+            currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">No active members found.</td></tr>`;
           }
 
           // Past-member details are stored in the dedicated past_members table.
@@ -310,7 +277,7 @@
 
         } catch (err) {
           console.error("Supabase load error:", err);
-          currentBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
+          currentBody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
           pastBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Error loading data from Supabase.</td></tr>`;
         }
       }
@@ -338,28 +305,6 @@
           container.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">No past member records found.</td></tr>`;
         }
       }
-
-      document.getElementById('currentMembersBody').addEventListener('change', async event => {
-        const input = event.target;
-        if (!input.matches('.profile-photo-input') || !input.files?.[0]) return;
-        try {
-          const { data: { user } } = await supabaseClient.auth.getUser();
-          if (!user || user.id !== input.dataset.memberId) throw new Error('Please sign in to update your profile picture.');
-          input.disabled = true;
-          const photo = await compressProfilePhoto(input.files[0]);
-          const path = `${user.id}/selfie.jpg`;
-          const { error: uploadError } = await supabaseClient.storage.from('choir-selfies').upload(path, photo, { upsert: true, contentType: 'image/jpeg' });
-          if (uploadError) throw uploadError;
-          const { error: profileError } = await supabaseClient.rpc('choir_save_selfie', { p_path: path });
-          if (profileError) throw profileError;
-          await loadMembers();
-          alert('Your profile picture has been updated.');
-        } catch (error) {
-          input.value = '';
-          input.disabled = false;
-          alert(error.message || 'Could not update your profile picture.');
-        }
-      });
 
       loadMembers();
     });
