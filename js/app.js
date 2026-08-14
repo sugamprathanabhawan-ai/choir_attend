@@ -9,6 +9,27 @@ const supabase = createClient(config.url, config.anonKey, { auth: { persistSessi
 let user, profile, settings, selectedStatus = 'present', compressedSelfie, selfiePreparation;
 const $ = id => document.getElementById(id);
 const text = (id, value = '') => { $(id).textContent = value; };
+const THEME_KEY = 'choir_theme';
+function applyTheme(theme) {
+  const dark = theme === 'dark';
+  document.documentElement.classList.toggle('dark-mode', dark);
+  ['darkModeToggle', 'authDarkModeToggle'].forEach(id => {
+    const toggle = $(id);
+    if (!toggle) return;
+    toggle.innerHTML = `<i class="fa-solid fa-${dark ? 'sun' : 'moon'}"></i>`;
+    toggle.setAttribute('aria-label', `Switch to ${dark ? 'light' : 'dark'} mode`);
+    toggle.title = `Switch to ${dark ? 'light' : 'dark'} mode`;
+  });
+}
+const savedTheme = localStorage.getItem(THEME_KEY);
+applyTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+function toggleTheme() {
+  const nextTheme = document.documentElement.classList.contains('dark-mode') ? 'light' : 'dark';
+  localStorage.setItem(THEME_KEY, nextTheme);
+  applyTheme(nextTheme);
+}
+$('darkModeToggle').addEventListener('click', toggleTheme);
+$('authDarkModeToggle').addEventListener('click', toggleTheme);
 const SAVED_LOGIN_KEY = 'choir_saved_login';
 function rememberLogin(email, password) { localStorage.setItem(SAVED_LOGIN_KEY, JSON.stringify({ email, password })); }
 function restoreSavedLogin() {
@@ -131,7 +152,7 @@ $('signupForm').addEventListener('submit', async event => {
   catch (error) { toast(error.message || 'Could not create the account.', 'error'); }
   finally { button.disabled = false; }
 });
-$('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = submitButton(event.currentTarget); const email = $('loginEmail').value.trim(); const symbol = $('loginSymbol').value; button.disabled = true; loginProgress.classList.remove('hidden'); try { await withLoader('Signing you in', 'Opening your choir space', async () => { const { data, error } = await supabase.auth.signInWithPassword({ email, password: symbol }); if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email and symbol number do not match.' : error.message); rememberLogin(email, symbol); await boot(data.user); }); } catch (error) { toast(error.message || 'Could not log in.', 'error'); } finally { loginProgress.classList.add('hidden'); button.disabled = false; } });
+$('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = submitButton(event.currentTarget); const email = $('loginEmail').value.trim(); const symbol = $('loginSymbol').value.trim(); button.disabled = true; loginProgress.classList.remove('hidden'); try { await withLoader('Signing you in', 'Opening your choir space', async () => { const { data, error } = await supabase.auth.signInWithPassword({ email, password: symbol }); if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email and symbol number do not match.' : error.message); rememberLogin(email, symbol); await boot(data.user); }); } catch (error) { toast(error.message || 'Could not log in.', 'error'); } finally { loginProgress.classList.add('hidden'); button.disabled = false; } });
 
 function startClock() { const render = () => text('nepalClock', new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format()); render(); setInterval(render, 1000); }
 async function signedSelfie() {
@@ -161,7 +182,7 @@ async function boot(activeUser) {
   if (!activeUser) return;
   user = activeUser;
   const [{ data: nextProfile, error: profileError }, { data: nextSettings, error: settingsError }] = await Promise.all([
-    supabase.from('choir_profiles').select('*').eq('id', user.id).single(), supabase.from('choir_settings').select('*').eq('id', 1).single()
+    supabase.from('choir_profiles').select('id,full_name,email,symbolnum,selfie_path,status,role').eq('id', user.id).single(), supabase.from('choir_settings').select('month_name,working_days').eq('id', 1).single()
   ]); if (profileError || settingsError) return toast((profileError || settingsError).message, 'error'); profile = nextProfile; settings = nextSettings;
   $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); text('navEmail', profile.email); text('navName', profile.full_name); text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`); startClock();
   if (profile.status !== 'approved') $('pendingPanel').classList.remove('hidden');
@@ -206,10 +227,11 @@ $('attendanceForm').addEventListener('submit', async event => {
 });
 
 async function loadAdmin() {
-  const { error: syncError } = await supabase.rpc('choir_sync_missing_symbols');
-  if (syncError && syncError.code !== '42883') return toast(syncError.message, 'error');
+  // Symbol repair runs in the background so it never delays the board.
+  const syncRequest = supabase.rpc('choir_sync_missing_symbols');
   const [aggregates, stack, pending] = await Promise.all([supabase.from('choir_attendance_aggregate').select('*').order('name'), supabase.from('choir_attendance_stack').select('*').order('datefilled', { ascending: false }).limit(300), supabase.from('choir_profiles').select('id,full_name,email,phone_num,symbolnum').eq('status', 'pending').order('created_at')]);
   if (aggregates.error || stack.error || pending.error) return toast((aggregates.error || stack.error || pending.error).message, 'error');
+  void syncRequest.then(({ error }) => { if (error && error.code !== '42883') console.warn('Symbol sync will retry on the next refresh.', error); });
   $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="6">No approved members.</td></tr>';
   $('stackRows').innerHTML = stack.data.map(r => `<tr><td>${escape(r.symbol)}</td><td>${escape(r.datefilled)}</td><td>${escape(r.name)}</td><td>${escape(r.reason || '—')}</td><td>${r.point}/${r.holiday_used}/${r.attendance_on_time}</td></tr>`).join('') || '<tr><td colspan="5">No submissions yet.</td></tr>';
   $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td class="whitespace-nowrap"><label class="sr-only" for="manual-points-${r.user_id}">Manual points for ${escape(r.name)}</label><input id="manual-points-${r.user_id}" data-manual-points-input="${r.user_id}" type="number" min="1" max="100" step="1" value="1" class="w-16 rounded-lg border border-sky-200 px-2 py-1 text-sm" aria-label="Manual points for ${escape(r.name)}"><button data-add-manual-points="${r.user_id}" class="ml-1 rounded-lg bg-ink px-2 py-1 text-xs font-bold text-white">Add</button></td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="7">No approved members.</td></tr>';
