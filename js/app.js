@@ -56,6 +56,7 @@ function friendlyError(error, fallback = 'Something went wrong. Please try again
   if (message.includes('choose present or absent')) return 'Please choose Present or Absent.';
   if (message.includes('absence reason') || message.includes('tell us why you are absent')) return 'Please tell us why you are absent.';
   if (message.includes('no member was found') || message.includes('approved member not found')) return 'We could not find that member.';
+  if (message.includes('attendance record not found')) return 'That attendance record has already been removed.';
   if (message.includes('manual points must')) return 'Enter a whole number from 1 to 100.';
   if (message.includes('not all manual points')) return 'We could not add all the points. Please try again.';
   if (message.includes('invalid selfie path') || message.includes('photo')) return 'We could not use that photo. Please choose another one.';
@@ -282,7 +283,7 @@ async function loadAdmin() {
   if (aggregates.error || stack.error || pending.error) return toast(friendlyError(aggregates.error || stack.error || pending.error, 'We could not load the choir board. Please refresh and try again.'), 'error');
   void syncRequest.then(({ error }) => { if (error && error.code !== '42883') console.warn('Symbol sync will retry on the next refresh.', error); });
   $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="6">No approved members.</td></tr>';
-  $('stackRows').innerHTML = stack.data.map(r => `<tr><td>${escape(r.symbol)}</td><td>${escape(r.datefilled)}</td><td>${escape(r.name)}</td><td>${escape(r.reason || '—')}</td><td>${r.point}/${r.holiday_used}/${r.attendance_on_time}</td></tr>`).join('') || '<tr><td colspan="5">No submissions yet.</td></tr>';
+  $('stackRows').innerHTML = stack.data.map(r => `<tr><td>${escape(r.symbol)}</td><td>${escape(r.datefilled)}</td><td>${escape(r.name)}</td><td>${escape(r.reason || '—')}</td><td>${r.point}/${r.holiday_used}/${r.attendance_on_time}</td><td><button type="button" data-delete-stack-row="${r.id}" class="rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button></td></tr>`).join('') || '<tr><td colspan="6">No submissions yet.</td></tr>';
   $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td class="whitespace-nowrap"><label class="sr-only" for="manual-points-${r.user_id}">Manual points for ${escape(r.name)}</label><input id="manual-points-${r.user_id}" data-manual-points-input="${r.user_id}" type="number" min="1" max="100" step="1" value="1" class="w-16 rounded-lg border border-sky-200 px-2 py-1 text-sm" aria-label="Manual points for ${escape(r.name)}"><button data-add-manual-points="${r.user_id}" class="ml-1 rounded-lg bg-ink px-2 py-1 text-xs font-bold text-white">Add</button></td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="7">No approved members.</td></tr>';
   $('pendingRows').innerHTML = pending.data.map(r => `<tr><td>${escape(r.full_name)}</td><td>${escape(r.email)}</td><td>${escape(r.phone_num)}</td><td>${escape(r.symbolnum || 'Not provided')}</td><td class="whitespace-nowrap"><button data-approve="${r.id}" data-has-symbol="${r.symbolnum ? 'true' : 'false'}" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Approve</button> <button data-reject="${r.id}" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Reject</button></td></tr>`).join('') || '<tr><td colspan="5">No pending requests.</td></tr>';
   $('settingMonth').value = settings.month_name; $('settingDays').value = settings.working_days;
@@ -292,6 +293,21 @@ $('syncDataBtn').addEventListener('click', async () => {
     await withLoader('Refreshing data', 'Loading the latest choir information', loadAdmin);
     toast('Data refreshed.');
   } catch (error) { toast(friendlyError(error, 'We could not refresh the choir board. Please try again.'), 'error'); }
+});
+$('stackRows').addEventListener('click', async event => {
+  const stackId = event.target.dataset.deleteStackRow;
+  if (!stackId || !window.confirm('Delete this attendance record? This cannot be undone.')) return;
+  event.target.disabled = true;
+  try {
+    await withLoader('Deleting attendance', 'Removing the selected attendance record', async () => {
+      const { error } = await supabase.rpc('choir_admin_delete_stack_row', { p_stack_id: stackId });
+      if (error) throw error;
+      await loadAdmin();
+      await loadMember();
+    });
+    toast('Attendance record deleted.');
+  } catch (error) { toast(friendlyError(error, 'We could not delete that attendance record. Please try again.'), 'error'); }
+  finally { event.target.disabled = false; }
 });
 $('aggregateRows').addEventListener('click', async event => {
   const memberId = event.target.dataset.addManualPoints;
