@@ -71,6 +71,7 @@ const submitButton = form => form.querySelector('button[type="submit"], button:n
 function escape(value = '') { const el = document.createElement('span'); el.textContent = value; return el.innerHTML; }
 function nptNow() { return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' })); }
 function nptDate(value = new Date()) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value); }
+function nptTime(value) { return value ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '—'; }
 function isAdmin() { return profile?.role === 'admin' && profile?.status === 'approved'; }
 function clearAttendanceResult() { $('attendanceResult').classList.add('hidden'); $('retryAttendance').classList.add('hidden'); }
 function showAttendanceResult(title, detail, type = 'success') {
@@ -90,6 +91,15 @@ function attendanceResultMessage(record) {
       : 'You received no point because you were present on time.';
   const timeMessage = record.attendance_on_time === 1 ? 'It was recorded on time.' : 'It was recorded after the 9:50 AM on-time deadline.';
   return `${pointMessage} ${timeMessage}`;
+}
+function attendanceCompleteMessage(record) {
+  const time = nptTime(record?.time_filled);
+  const completion = time === '—'
+    ? 'You have successfully filled in attendance for this Saturday. The form is now closed for you.'
+    : `You already filled in attendance today at ${time} Nepal time. The form is closed for you.`;
+  return record?.attendance_status === 'present' && Number(record?.attendance_on_time) === 0
+    ? `${completion} You are late! Please be punctual next time.`
+    : completion;
 }
 function closeAttendanceForm(message = 'You have successfully filled in attendance for this Saturday. The form is now closed for you.') {
   $('attendanceSubmit').disabled = true;
@@ -233,7 +243,7 @@ async function loadMember() {
   const [lawResult, aggregateResult, attendanceResult] = await Promise.all([
     supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).maybeSingle(),
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
-    supabase.from('choir_attendance_stack').select('attendance_status').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle()
+    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle()
   ]);
   if (lawResult.error || aggregateResult.error || attendanceResult.error) {
     throw lawResult.error || aggregateResult.error || attendanceResult.error;
@@ -248,7 +258,7 @@ async function loadMember() {
   const formClosed = alreadySubmitted || !inWindow || profile.status !== 'approved';
   $('attendanceSubmit').disabled = formClosed; $('reasonInput').disabled = formClosed;
   document.querySelectorAll('.status-btn').forEach(button => { button.disabled = formClosed; });
-  if (alreadySubmitted) closeAttendanceForm();
+  if (alreadySubmitted) closeAttendanceForm(attendanceCompleteMessage(attendanceResult.data));
 }
 $('retryAttendance').addEventListener('click', () => $('attendanceForm').requestSubmit());
 document.querySelectorAll('.status-btn').forEach(button => button.addEventListener('click', () => { selectedStatus = button.dataset.status; document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el === button)); $('reasonWrap').classList.toggle('hidden', selectedStatus !== 'absent'); clearAttendanceResult(); }));
@@ -263,17 +273,17 @@ $('attendanceForm').addEventListener('submit', async event => {
   button.disabled = false;
   if (error) {
     if (error.code === '23505' || String(error.message || '').toLowerCase().includes('duplicate key')) {
-      closeAttendanceForm();
+      await loadMember();
       return toast('You have already filled in attendance for today.');
     }
     const message = friendlyError(error, 'We could not save your attendance. Please try again.');
     showAttendanceResult('Attendance was not saved.', message, 'error');
     return toast(message, 'error');
   }
-  showAttendanceResult('Attendance complete.', 'You have successfully filled in attendance for this Saturday. The form is now closed for you.');
+  showAttendanceResult('Attendance complete.', attendanceCompleteMessage(data));
   toast('You have successfully filled in attendance for this Saturday.'); event.target.reset(); selectedStatus = 'present';
   document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el.dataset.status === 'present'));
-  $('reasonWrap').classList.add('hidden'); closeAttendanceForm(); await loadMember();
+  $('reasonWrap').classList.add('hidden'); closeAttendanceForm(attendanceCompleteMessage(data)); await loadMember();
 });
 
 async function loadAdmin() {
@@ -283,7 +293,7 @@ async function loadAdmin() {
   if (aggregates.error || stack.error || pending.error) return toast(friendlyError(aggregates.error || stack.error || pending.error, 'We could not load the choir board. Please refresh and try again.'), 'error');
   void syncRequest.then(({ error }) => { if (error && error.code !== '42883') console.warn('Symbol sync will retry on the next refresh.', error); });
   $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="6">No approved members.</td></tr>';
-  $('stackRows').innerHTML = stack.data.map(r => `<tr><td>${escape(r.symbol)}</td><td>${escape(r.datefilled)}</td><td>${escape(r.name)}</td><td>${escape(r.reason || '—')}</td><td>${r.point}/${r.holiday_used}/${r.attendance_on_time}</td><td><button type="button" data-delete-stack-row="${r.id}" class="rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button></td></tr>`).join('') || '<tr><td colspan="6">No submissions yet.</td></tr>';
+  $('stackRows').innerHTML = stack.data.map(r => `<tr><td>${escape(r.symbol)}</td><td>${escape(r.datefilled)}</td><td>${escape(r.name)}</td><td>${escape(r.reason || '—')}</td><td>${nptTime(r.time_filled)}</td><td>${r.point}/${r.holiday_used}/${r.attendance_on_time}</td><td><button type="button" data-delete-stack-row="${r.id}" class="rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button></td></tr>`).join('') || '<tr><td colspan="7">No submissions yet.</td></tr>';
   $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td class="whitespace-nowrap"><label class="sr-only" for="manual-points-${r.user_id}">Manual points for ${escape(r.name)}</label><input id="manual-points-${r.user_id}" data-manual-points-input="${r.user_id}" type="number" min="1" max="100" step="1" value="1" class="w-16 rounded-lg border border-sky-200 px-2 py-1 text-sm" aria-label="Manual points for ${escape(r.name)}"><button data-add-manual-points="${r.user_id}" class="ml-1 rounded-lg bg-ink px-2 py-1 text-xs font-bold text-white">Add</button></td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="7">No approved members.</td></tr>';
   $('pendingRows').innerHTML = pending.data.map(r => `<tr><td>${escape(r.full_name)}</td><td>${escape(r.email)}</td><td>${escape(r.phone_num)}</td><td>${escape(r.symbolnum || 'Not provided')}</td><td class="whitespace-nowrap"><button data-approve="${r.id}" data-has-symbol="${r.symbolnum ? 'true' : 'false'}" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Approve</button> <button data-reject="${r.id}" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Reject</button></td></tr>`).join('') || '<tr><td colspan="5">No pending requests.</td></tr>';
   $('settingMonth').value = settings.month_name; $('settingDays').value = settings.working_days;
