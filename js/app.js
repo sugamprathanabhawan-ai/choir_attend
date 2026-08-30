@@ -60,6 +60,8 @@ function friendlyError(error, fallback = 'Something went wrong. Please try again
   if (message.includes('manual points must')) return 'Enter a whole number from 1 to 100.';
   if (message.includes('not all manual points')) return 'We could not add all the points. Please try again.';
   if (message.includes('invalid selfie path') || message.includes('photo')) return 'We could not use that photo. Please choose another one.';
+  if (message.includes('missing attendance can only be marked')) return 'Missing attendance can only be marked after 11:00 PM Nepal time on Saturday.';
+  if (message.includes('specified date is not a saturday')) return 'Missing attendance can only be recorded for Saturdays.';
   if (message.includes('check constraint') || message.includes('invalid input')) return 'Please check the information you entered and try again.';
   if (error?.code === 'PGRST116' || message.includes('0 rows')) return 'We could not find your account. Please try logging in again.';
   return fallback;
@@ -93,6 +95,12 @@ function attendanceResultMessage(record) {
   return `${pointMessage} ${timeMessage}`;
 }
 function attendanceCompleteMessage(record) {
+  if (record?.attendance_status === 'not_filled') {
+    const pointText = Number(record?.point) === 1
+      ? '1 penalty point was added because your monthly holiday had already been used.'
+      : '0 penalty points were added (used your 1 monthly holiday).';
+    return `You did not fill the form before Saturday 11:00 PM Nepal time. A missing attendance record was logged on the rule basis (${pointText})`;
+  }
   const time = nptTime(record?.time_filled);
   const completion = time === '—'
     ? 'You have successfully filled in attendance for this Saturday. The form is now closed for you.'
@@ -317,6 +325,19 @@ async function showMemberDetail() {
   const totals = rows.reduce((sum, row) => ({ points: sum.points + Number(row.point), holidays: sum.holidays + Number(row.holiday_used), onTime: sum.onTime + Number(row.attendance_on_time) }), { points: 0, holidays: 0, onTime: 0 });
   result.innerHTML = `<div class="grid gap-3 sm:grid-cols-4"><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">Member</p><p class="mt-1 font-bold">${escape(memberName)}</p></div><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">Points received</p><p class="mt-1 text-2xl font-black">${totals.points}</p></div><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">Holidays used</p><p class="mt-1 text-2xl font-black">${totals.holidays}</p></div><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">On time</p><p class="mt-1 text-2xl font-black">${totals.onTime}</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Month</th><th>Attendance</th><th>Reason / point source</th><th>Time</th><th>Point</th><th>Holiday</th><th>On time</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escape(row.datefilled)}</td><td>${escape(row.month_name)}</td><td>${escape(attendanceLabel(row))}</td><td>${escape(row.reason || '—')}</td><td>${nptTime(row.time_filled)}</td><td>${row.point}</td><td>${row.holiday_used}</td><td>${row.attendance_on_time}</td></tr>`).join('') || '<tr><td colspan="8">No attendance records for this member.</td></tr>'}</tbody></table></div>`;
 }
+$('markMissingBtn')?.addEventListener('click', async () => {
+  if (!window.confirm('Check and mark missing attendance for approved members who did not submit attendance before Saturday 11:00 PM? Points will be assigned on the monthly holiday rule basis.')) return;
+  try {
+    await withLoader('Checking missing attendance', 'Recording missing attendance on the rule basis', async () => {
+      const { data: count, error } = await supabase.rpc('choir_mark_missing_attendance');
+      if (error) throw error;
+      await loadAdmin();
+      await loadMember();
+      const num = Number(count) || 0;
+      toast(num > 0 ? `Marked missing attendance for ${num} member${num === 1 ? '' : 's'} on the rule basis.` : 'No missing attendance records were needed for today.');
+    });
+  } catch (error) { toast(friendlyError(error, 'We could not mark missing attendance. Please try again.'), 'error'); }
+});
 $('syncDataBtn').addEventListener('click', async () => {
   try {
     await withLoader('Refreshing data', 'Loading the latest choir information', loadAdmin);
