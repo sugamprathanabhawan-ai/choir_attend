@@ -344,29 +344,78 @@ async function boot(activeUser) {
 async function loadMember() {
   text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
   const today = nptDate();
-  const [lawResult, aggregateResult, attendanceResult, stackPointsResult] = await Promise.all([
+  const [lawResult, aggregateResult, attendanceResult, stackPointsResult, streakRpcResult] = await Promise.all([
     supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).maybeSingle(),
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
     supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle(),
-    supabase.from('choir_attendance_stack').select('user_id,point,datefilled,attendance_on_time,attendance_status').lte('datefilled', today).order('datefilled', { ascending: false })
+    supabase.from('choir_attendance_stack').select('user_id,point,datefilled,attendance_on_time,attendance_status').lte('datefilled', today).order('datefilled', { ascending: false }).limit(5000),
+    supabase.rpc('choir_get_member_streaks').catch(() => ({ data: null }))
   ]);
   if (lawResult.error || aggregateResult.error || attendanceResult.error) {
     throw lawResult.error || aggregateResult.error || attendanceResult.error;
   }
   if (lawResult.data) { $('personalLawCard').classList.remove('hidden'); text('personalLaw', lawResult.data.personal_law); }
   const stackPointsByUser = {};
-  const streakByUser = {};
-  const streakBrokenByUser = new Set();
+  const userAttendanceRecords = {};
   (stackPointsResult?.data || []).forEach(row => {
     stackPointsByUser[row.user_id] = (stackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
-    if (row.attendance_status === 'manual') return;
-    if (streakBrokenByUser.has(row.user_id)) return;
-    if (Number(row.attendance_on_time) === 1) {
-      streakByUser[row.user_id] = (streakByUser[row.user_id] || 0) + 1;
-    } else {
-      streakBrokenByUser.add(row.user_id);
+    if (row.attendance_status !== 'manual') {
+      if (!userAttendanceRecords[row.user_id]) userAttendanceRecords[row.user_id] = [];
+      userAttendanceRecords[row.user_id].push(row);
     }
   });
+
+  const activeSatStr = getActiveSaturdayDate();
+  const activeSatDate = new Date(activeSatStr + 'T12:00:00Z');
+  const streakByUser = {};
+
+  // Populate streaks from security-definer RPC if available
+  (streakRpcResult?.data || []).forEach(item => {
+    if (item.user_id && item.streak !== undefined) {
+      streakByUser[item.user_id] = Number(item.streak) || 0;
+    }
+  });
+
+  // Calculate streaks client-side from attendance stack
+  Object.entries(userAttendanceRecords).forEach(([userId, records]) => {
+    records.sort((a, b) => b.datefilled.localeCompare(a.datefilled));
+    if (records.length === 0) return;
+
+    const mostRecent = records[0];
+    const mostRecentDate = new Date(mostRecent.datefilled + 'T12:00:00Z');
+    const daysSinceActive = Math.round((activeSatDate - mostRecentDate) / (1000 * 60 * 60 * 24));
+
+    // If most recent record was late or absent, streak is broken
+    if (Number(mostRecent.attendance_on_time) !== 1) {
+      streakByUser[userId] = 0;
+      return;
+    }
+
+    // If latest record is older than previous Saturday (>7 days from active Saturday), streak has expired
+    if (daysSinceActive > 7) {
+      streakByUser[userId] = 0;
+      return;
+    }
+
+    let streak = 0;
+    let prevDate = null;
+    for (const row of records) {
+      if (Number(row.attendance_on_time) !== 1) {
+        break; // Late or absent record breaks continuous streak
+      }
+      const rowDate = new Date(row.datefilled + 'T12:00:00Z');
+      if (prevDate !== null) {
+        const diffDays = Math.round((prevDate - rowDate) / (1000 * 60 * 60 * 24));
+        if (diffDays > 7) {
+          break; // Gap detected between Saturdays
+        }
+      }
+      streak++;
+      prevDate = rowDate;
+    }
+    streakByUser[userId] = streak;
+  });
+
   const workingDays = Number(settings?.working_days) || 4;
   const aggregates = (aggregateResult.data || []).map(row => {
     const rawStackPoints = stackPointsByUser[row.user_id];
@@ -386,16 +435,32 @@ async function loadMember() {
     agg.total_points = stackPointsByUser[user.id] - myBonus;
   }
   const bonusNote = Number(agg.total_attendance_on_time) >= workingDays ? ' (on-time bonus: -1 point applied)' : '';
-  const myStreak = streakByUser[user.id] || 0;
+  const myStreak = (agg.on_time_streak !== undefined && agg.on_time_streak !== null && Number(agg.on_time_streak) > 0)
+    ? Number(agg.on_time_streak)
+    : (streakByUser[user.id] || 0);
   const streakNote = myStreak > 0 ? ` • active on-time streak: 🔥 ${myStreak}` : '';
   $('memberStats').innerHTML = aggregates.map(row => {
     const isFine = Number(row.total_points) >= 10;
-    const streak = streakByUser[row.user_id] || 0;
+    const streak = (row.on_time_streak !== undefined && row.on_time_streak !== null && Number(row.on_time_streak) > 0)
+      ? Number(row.on_time_streak)
+      : (streakByUser[row.user_id] || 0);
+    const onTimeCount = Number(row.total_attendance_on_time) || 0;
     const streakBadge = streak > 0
-      ? `<span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-black text-amber-600 border border-amber-200/80 shadow-xs dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/40"><span class="text-sm">🔥</span> ${streak}</span>`
-      : '<span class="text-slate-300 dark:text-slate-600 font-medium">—</span>';
-    return `<tr class="${isFine ? 'fine-row' : ''}"><td class="p-3 font-semibold">${escape(row.name)}</td><td class="p-3 font-bold">${row.total_points}</td><td class="p-3">${row.total_holiday_used}</td><td class="p-3">${streakBadge}</td><td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`;
-  }).join('') || '<tr><td colspan="5">No member statistics yet.</td></tr>';
+      ? `<span class="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2.5 py-0.5 text-xs font-black text-white shadow-sm shadow-orange-500/20" title="Active on-time streak: ${streak} continuous Saturdays"><span class="text-xs">🔥</span> ${streak}</span>`
+      : '';
+    return `<tr class="${isFine ? 'fine-row' : ''}">
+      <td class="p-3 font-semibold text-slate-900 dark:text-slate-100">${escape(row.name)}</td>
+      <td class="p-3 font-bold text-slate-900 dark:text-slate-100">${row.total_points}</td>
+      <td class="p-3 text-slate-700 dark:text-slate-300">${row.total_holiday_used}</td>
+      <td class="p-3">
+        <div class="inline-flex items-center gap-2 font-bold text-ink dark:text-sky-300" title="Month on-time: ${onTimeCount}${streak > 0 ? ` • Active streak: 🔥 ${streak}` : ''}">
+          <span>${onTimeCount}</span>
+          ${streakBadge}
+        </div>
+      </td>
+      <td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="py-4 text-center text-slate-500">No member statistics yet.</td></tr>';
   text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}${bonusNote}${streakNote}`);
   const npt = nptNow(); const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
   const alreadySubmitted = Boolean(attendanceResult.data);
@@ -571,6 +636,29 @@ async function showMemberDetail(targetMemberId = null) {
     onTime: sum.onTime + Number(row.attendance_on_time || 0)
   }), { points: 0, holidays: 0, onTime: 0 });
 
+  const nonManualRows = (rows || []).filter(r => r.attendance_status !== 'manual').sort((a, b) => b.datefilled.localeCompare(a.datefilled));
+  let detailStreak = 0;
+  if (nonManualRows.length > 0) {
+    const activeSatStr = getActiveSaturdayDate();
+    const activeSatDate = new Date(activeSatStr + 'T12:00:00Z');
+    const mostRecent = nonManualRows[0];
+    const mostRecentDate = new Date(mostRecent.datefilled + 'T12:00:00Z');
+    const daysSinceActive = Math.round((activeSatDate - mostRecentDate) / (1000 * 60 * 60 * 24));
+    if (Number(mostRecent.attendance_on_time) === 1 && daysSinceActive <= 7) {
+      let prevDate = null;
+      for (const r of nonManualRows) {
+        if (Number(r.attendance_on_time) !== 1) break;
+        const rDate = new Date(r.datefilled + 'T12:00:00Z');
+        if (prevDate !== null) {
+          const diffDays = Math.round((prevDate - rDate) / (1000 * 60 * 60 * 24));
+          if (diffDays > 7) break;
+        }
+        detailStreak++;
+        prevDate = rDate;
+      }
+    }
+  }
+
   result.innerHTML = `
     <div class="grid gap-3 sm:grid-cols-4">
       <div class="rounded-xl bg-sky-50 p-4">
@@ -587,7 +675,10 @@ async function showMemberDetail(targetMemberId = null) {
       </div>
       <div class="rounded-xl bg-sky-50 p-4">
         <p class="text-xs font-bold uppercase text-sky-700">On time</p>
-        <p class="mt-1 text-2xl font-black">${totals.onTime}</p>
+        <div class="mt-1 flex items-center gap-2">
+          <span class="text-2xl font-black">${totals.onTime}</span>
+          ${detailStreak > 0 ? `<span class="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2.5 py-0.5 text-xs font-black text-white shadow-sm shadow-orange-500/20" title="Active continuous streak: ${detailStreak}"><span class="text-xs">🔥</span> ${detailStreak}</span>` : ''}
+        </div>
       </div>
     </div>
 
