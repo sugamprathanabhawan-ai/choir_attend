@@ -263,19 +263,27 @@ async function loadMember() {
   (stackPointsResult?.data || []).forEach(row => {
     stackPointsByUser[row.user_id] = (stackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
   });
+  const workingDays = Number(settings?.working_days) || 4;
   const aggregates = (aggregateResult.data || []).map(row => {
-    const calculatedPoints = stackPointsByUser[row.user_id];
+    const rawStackPoints = stackPointsByUser[row.user_id];
+    const onTime = Number(row.total_attendance_on_time) || 0;
+    const onTimeBonus = onTime >= workingDays ? 1 : 0;
+    const basePoints = rawStackPoints !== undefined ? rawStackPoints : (Number(row.total_points) || 0);
+    const totalPoints = rawStackPoints !== undefined ? (basePoints - onTimeBonus) : basePoints;
     return {
       ...row,
-      total_points: calculatedPoints !== undefined ? Math.max(Number(row.total_points) || 0, calculatedPoints) : (Number(row.total_points) || 0)
+      total_points: totalPoints
     };
   });
   const agg = aggregates.find(row => row.user_id === user.id) || { total_points: 0, total_holiday_used: 0, total_attendance_on_time: 0 };
   if (stackPointsByUser[user.id] !== undefined) {
-    agg.total_points = Math.max(Number(agg.total_points) || 0, stackPointsByUser[user.id]);
+    const myOnTime = Number(agg.total_attendance_on_time) || 0;
+    const myBonus = myOnTime >= workingDays ? 1 : 0;
+    agg.total_points = stackPointsByUser[user.id] - myBonus;
   }
+  const bonusNote = Number(agg.total_attendance_on_time) >= workingDays ? ' (on-time bonus: -1 point applied)' : '';
   $('memberStats').innerHTML = aggregates.map(row => { const isFine = Number(row.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td class="p-3 font-semibold">${escape(row.name)}</td><td class="p-3 font-bold">${row.total_points}</td><td class="p-3">${row.total_holiday_used}</td><td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="4">No member statistics yet.</td></tr>';
-  text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}`);
+  text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}${bonusNote}`);
   const npt = nptNow(); const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
   const alreadySubmitted = Boolean(attendanceResult.data);
   text('attendanceState', alreadySubmitted ? 'Already filled in' : inWindow && profile.status === 'approved' ? 'Form is open' : profile.status === 'approved' ? 'Form is closed' : 'Approval required');
@@ -311,31 +319,113 @@ $('attendanceForm').addEventListener('submit', async event => {
   $('reasonWrap').classList.add('hidden'); closeAttendanceForm(attendanceCompleteMessage(data)); await loadMember();
 });
 
+function getActiveSaturdayDate() {
+  const npt = nptNow();
+  const day = npt.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const diffToSat = (day + 1) % 7; // Sat: 0, Sun: 1, Mon: 2, etc.
+  const sat = new Date(npt.getTime() - diffToSat * 86400000);
+  return nptDate(sat);
+}
+
+async function loadUnsubmittedSaturday(targetDate) {
+  const satDate = targetDate || $('saturdayDateSelect')?.value || getActiveSaturdayDate();
+  if ($('saturdayDateSelect') && $('saturdayDateSelect').value !== satDate) {
+    $('saturdayDateSelect').value = satDate;
+  }
+  const captionEl = $('unsubmittedCaption');
+  if (captionEl) captionEl.textContent = `Approved members who have not yet submitted attendance for Saturday (${satDate}).`;
+
+  const [approvedRes, stackRes] = await Promise.all([
+    supabase.from('choir_profiles').select('id,full_name,symbolnum,email,phone_num').eq('status', 'approved').order('full_name'),
+    supabase.from('choir_attendance_stack').select('user_id,attendance_status').eq('datefilled', satDate)
+  ]);
+
+  if (approvedRes.error || stackRes.error) {
+    console.error('Error loading unsubmitted Saturday attendance:', approvedRes.error || stackRes.error);
+    return;
+  }
+
+  const submittedUserIds = new Set();
+  const autoMarkedUserIds = new Set();
+  (stackRes.data || []).forEach(row => {
+    if (row.attendance_status === 'present' || row.attendance_status === 'absent') {
+      submittedUserIds.add(row.user_id);
+    } else if (row.attendance_status === 'not_filled') {
+      autoMarkedUserIds.add(row.user_id);
+    }
+  });
+
+  const unsubmitted = (approvedRes.data || []).filter(m => !submittedUserIds.has(m.id));
+
+  const countEl = $('unsubmittedCount');
+  if (countEl) {
+    if (unsubmitted.length === 0) {
+      countEl.textContent = 'All submitted';
+      countEl.className = 'rounded-full bg-emerald-100 px-3 py-0.5 text-xs font-bold text-emerald-800';
+    } else {
+      countEl.textContent = `${unsubmitted.length} pending`;
+      countEl.className = 'rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-800';
+    }
+  }
+
+  const rowsEl = $('unsubmittedRows');
+  if (rowsEl) {
+    if (unsubmitted.length === 0) {
+      rowsEl.innerHTML = '<tr><td colspan="5" class="py-6 text-center font-medium text-slate-500">All approved choir members have filled attendance for this Saturday! 🎉</td></tr>';
+    } else {
+      rowsEl.innerHTML = unsubmitted.map(m => {
+        const isAutoMarked = autoMarkedUserIds.has(m.id);
+        const statusBadge = isAutoMarked
+          ? '<span class="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-700">Auto-marked missing</span>'
+          : '<span class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800">Not submitted yet</span>';
+        return `<tr>
+          <td class="font-bold text-ink">${escape(m.full_name)}</td>
+          <td><span class="font-semibold text-slate-700">${escape(m.symbolnum || '—')}</span></td>
+          <td class="text-slate-600">${escape(m.email || '—')}</td>
+          <td class="text-slate-600">${escape(m.phone_num || '—')}</td>
+          <td>${statusBadge}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+}
+
 async function loadAdmin() {
   const today = nptDate();
+  const npt = nptNow();
+  // Automatically check missing attendance after Saturday 11:00 PM or Sunday
+  if ((npt.getDay() === 6 && npt.getHours() >= 23) || npt.getDay() === 0) {
+    void supabase.rpc('choir_mark_missing_attendance').catch(() => {});
+  }
   // Symbol repair runs in the background so it never delays the board.
   const syncRequest = supabase.rpc('choir_sync_missing_symbols');
-  const [aggregates, stack, pending, allPointsResult] = await Promise.all([
+  const [aggregates, pending, allPointsResult] = await Promise.all([
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
-    supabase.from('choir_attendance_stack').select('*').order('datefilled', { ascending: false }).limit(300),
     supabase.from('choir_profiles').select('id,full_name,email,phone_num,symbolnum').eq('status', 'pending').order('created_at'),
     supabase.from('choir_attendance_stack').select('user_id,point,datefilled').lte('datefilled', today)
   ]);
-  if (aggregates.error || stack.error || pending.error) return toast(friendlyError(aggregates.error || stack.error || pending.error, 'We could not load the choir board. Please refresh and try again.'), 'error');
+  if (aggregates.error || pending.error) return toast(friendlyError(aggregates.error || pending.error, 'We could not load the choir board. Please refresh and try again.'), 'error');
   void syncRequest.then(({ error }) => { if (error && error.code !== '42883') console.warn('Symbol sync will retry on the next refresh.', error); });
   const adminStackPointsByUser = {};
   (allPointsResult?.data || []).forEach(row => {
     adminStackPointsByUser[row.user_id] = (adminStackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
   });
+  const workingDays = Number(settings?.working_days) || 4;
   const adminAggregates = (aggregates.data || []).map(r => {
-    const calculatedPoints = adminStackPointsByUser[r.user_id];
+    const rawStackPoints = adminStackPointsByUser[r.user_id];
+    const onTime = Number(r.total_attendance_on_time) || 0;
+    const onTimeBonus = onTime >= workingDays ? 1 : 0;
+    const basePoints = rawStackPoints !== undefined ? rawStackPoints : (Number(r.total_points) || 0);
+    const totalPoints = rawStackPoints !== undefined ? (basePoints - onTimeBonus) : basePoints;
     return {
       ...r,
-      total_points: calculatedPoints !== undefined ? Math.max(Number(r.total_points) || 0, calculatedPoints) : (Number(r.total_points) || 0)
+      total_points: totalPoints
     };
   });
-  $('stackRows').innerHTML = stack.data.map(r => `<tr><td>${escape(r.symbol)}</td><td>${escape(r.datefilled)}</td><td>${escape(r.name)}</td><td>${escape(r.reason || '—')}</td><td>${nptTime(r.time_filled)}</td><td>${r.point}/${r.holiday_used}/${r.attendance_on_time}</td><td><button type="button" data-delete-stack-row="${r.id}" class="rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button></td></tr>`).join('') || '<tr><td colspan="7">No submissions yet.</td></tr>';
-  $('aggregateRows').innerHTML = adminAggregates.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td class="font-bold">${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td class="whitespace-nowrap"><label class="sr-only" for="manual-points-${r.user_id}">Manual points for ${escape(r.name)}</label><input id="manual-points-${r.user_id}" data-manual-points-input="${r.user_id}" type="number" min="1" max="100" step="1" value="1" class="w-16 rounded-lg border border-sky-200 px-2 py-1 text-sm" aria-label="Manual points for ${escape(r.name)}"><button data-add-manual-points="${r.user_id}" class="ml-1 rounded-lg bg-ink px-2 py-1 text-xs font-bold text-white">Add</button></td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="7">No approved members.</td></tr>';
+
+  // Load the Saturday unsubmitted attendance table
+  await loadUnsubmittedSaturday($('saturdayDateSelect')?.value);
+
   const detailSelect = $('memberDetailSelect'); const previouslySelected = detailSelect.value;
   detailSelect.innerHTML = '<option value="">Choose a member</option>' + adminAggregates.map(r => `<option value="${r.user_id}">${escape(r.name)}${r.symbolnum ? ` (${escape(r.symbolnum)})` : ''}</option>`).join('');
   if (adminAggregates.some(r => r.user_id === previouslySelected)) detailSelect.value = previouslySelected;
@@ -347,17 +437,103 @@ function attendanceLabel(row) {
   return row.attendance_status === 'manual' ? 'Manual point added' : row.attendance_status === 'not_filled' ? 'No form submitted' : row.attendance_status === 'absent' ? 'Absent' : 'Present';
 }
 
-async function showMemberDetail() {
-  const memberId = $('memberDetailSelect').value;
+async function showMemberDetail(targetMemberId = null) {
+  const memberId = targetMemberId || $('memberDetailSelect').value;
   const result = $('memberDetailResult');
   if (!memberId) return toast('Choose a member first.', 'error');
+  if ($('memberDetailSelect').value !== memberId) {
+    $('memberDetailSelect').value = memberId;
+  }
   result.innerHTML = '<p class="text-sm text-slate-500">Loading member history…</p>';
-  const { data: rows, error } = await supabase.from('choir_attendance_stack').select('datefilled,month_name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status').eq('user_id', memberId).order('datefilled', { ascending: false }).limit(1000);
+  const { data: rows, error } = await supabase.from('choir_attendance_stack')
+    .select('id,datefilled,month_name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status')
+    .eq('user_id', memberId)
+    .order('datefilled', { ascending: false })
+    .limit(1000);
   if (error) throw error;
   const memberName = $('memberDetailSelect').selectedOptions[0]?.textContent || 'Member';
-  const totals = rows.reduce((sum, row) => ({ points: sum.points + Number(row.point), holidays: sum.holidays + Number(row.holiday_used), onTime: sum.onTime + Number(row.attendance_on_time) }), { points: 0, holidays: 0, onTime: 0 });
-  result.innerHTML = `<div class="grid gap-3 sm:grid-cols-4"><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">Member</p><p class="mt-1 font-bold">${escape(memberName)}</p></div><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">Points received</p><p class="mt-1 text-2xl font-black">${totals.points}</p></div><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">Holidays used</p><p class="mt-1 text-2xl font-black">${totals.holidays}</p></div><div class="rounded-xl bg-sky-50 p-4"><p class="text-xs font-bold uppercase text-sky-700">On time</p><p class="mt-1 text-2xl font-black">${totals.onTime}</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Month</th><th>Attendance</th><th>Reason / point source</th><th>Time</th><th>Point</th><th>Holiday</th><th>On time</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escape(row.datefilled)}</td><td>${escape(row.month_name)}</td><td>${escape(attendanceLabel(row))}</td><td>${escape(row.reason || '—')}</td><td>${nptTime(row.time_filled)}</td><td>${row.point}</td><td>${row.holiday_used}</td><td>${row.attendance_on_time}</td></tr>`).join('') || '<tr><td colspan="8">No attendance records for this member.</td></tr>'}</tbody></table></div>`;
+  const totals = (rows || []).reduce((sum, row) => ({
+    points: sum.points + Number(row.point || 0),
+    holidays: sum.holidays + Number(row.holiday_used || 0),
+    onTime: sum.onTime + Number(row.attendance_on_time || 0)
+  }), { points: 0, holidays: 0, onTime: 0 });
+
+  result.innerHTML = `
+    <div class="grid gap-3 sm:grid-cols-4">
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">Member</p>
+        <p class="mt-1 font-bold truncate">${escape(memberName)}</p>
+      </div>
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">Points received</p>
+        <p class="mt-1 text-2xl font-black">${totals.points}</p>
+      </div>
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">Holidays used</p>
+        <p class="mt-1 text-2xl font-black">${totals.holidays}</p>
+      </div>
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">On time</p>
+        <p class="mt-1 text-2xl font-black">${totals.onTime}</p>
+      </div>
+    </div>
+
+    <!-- Manual Point Entry Directly in Member Detail -->
+    <div class="mt-4 rounded-xl border border-sky-100 bg-sky-50/70 p-4">
+      <form id="detailManualPointsForm" data-member-id="${memberId}" class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 class="text-sm font-bold text-ink">Give manual points</h3>
+          <p class="text-xs text-slate-500">Add manual point(s) to this member as stacking records.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label for="detailPointsInput" class="text-xs font-bold uppercase text-slate-500">Points:</label>
+          <input id="detailPointsInput" type="number" min="1" max="100" step="1" value="1" required class="input w-20 py-1.5 px-3 text-center text-sm font-bold" aria-label="Manual points to add">
+          <button id="detailAddPointsSubmit" type="submit" class="primary-btn py-1.5 px-4 text-xs font-bold whitespace-nowrap shadow-sm">
+            <i class="fa-solid fa-plus mr-1"></i> Add points
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="table-wrap mt-4">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Month</th>
+            <th>Attendance</th>
+            <th>Reason / point source</th>
+            <th>Time</th>
+            <th>Point</th>
+            <th>Holiday</th>
+            <th>On time</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(rows || []).map(row => `
+            <tr>
+              <td>${escape(row.datefilled)}</td>
+              <td>${escape(row.month_name)}</td>
+              <td><span class="${row.attendance_status === 'manual' ? 'font-semibold text-purple-700' : ''}">${escape(attendanceLabel(row))}</span></td>
+              <td>${escape(row.reason || '—')}</td>
+              <td>${nptTime(row.time_filled)}</td>
+              <td class="font-bold">${row.point}</td>
+              <td>${row.holiday_used}</td>
+              <td>${row.attendance_on_time}</td>
+              <td>
+                <button type="button" data-delete-detail-record="${row.id}" data-member-id="${memberId}" class="rounded-lg bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 hover:bg-red-100 transition">
+                  Delete
+                </button>
+              </td>
+            </tr>
+          `).join('') || '<tr><td colspan="9" class="py-4 text-center text-slate-500">No attendance records for this member.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
+
 $('markMissingBtn')?.addEventListener('click', async () => {
   if (!window.confirm('Check and mark missing attendance for approved members who did not submit attendance before Saturday 11:00 PM? Points will be assigned on the monthly holiday rule basis.')) return;
   try {
@@ -371,49 +547,95 @@ $('markMissingBtn')?.addEventListener('click', async () => {
     });
   } catch (error) { toast(friendlyError(error, 'We could not mark missing attendance. Please try again.'), 'error'); }
 });
-$('syncDataBtn').addEventListener('click', async () => {
+
+$('syncDataBtn')?.addEventListener('click', async () => {
   try {
     await withLoader('Refreshing data', 'Loading the latest choir information', loadAdmin);
     toast('Data refreshed.');
   } catch (error) { toast(friendlyError(error, 'We could not refresh the choir board. Please try again.'), 'error'); }
 });
-$('memberDetailBtn').addEventListener('click', async () => {
+
+$('memberDetailBtn')?.addEventListener('click', async () => {
   try { await showMemberDetail(); }
   catch (error) { $('memberDetailResult').innerHTML = '<p class="text-sm text-red-600">We could not load this member’s detail.</p>'; toast(friendlyError(error, 'We could not load this member’s detail. Please try again.'), 'error'); }
 });
-$('stackRows').addEventListener('click', async event => {
-  const stackId = event.target.dataset.deleteStackRow;
-  if (!stackId || !window.confirm('Delete this attendance record? This cannot be undone.')) return;
-  event.target.disabled = true;
-  try {
-    await withLoader('Deleting attendance', 'Removing the selected attendance record', async () => {
-      const { error } = await supabase.rpc('choir_admin_delete_stack_row', { p_stack_id: stackId });
-      if (error) throw error;
-      await loadAdmin();
-      await loadMember();
-    });
-    toast('Attendance record deleted.');
-  } catch (error) { toast(friendlyError(error, 'We could not delete that attendance record. Please try again.'), 'error'); }
-  finally { event.target.disabled = false; }
+
+$('memberDetailSelect')?.addEventListener('change', () => {
+  if ($('memberDetailSelect').value) {
+    showMemberDetail().catch(err => console.error(err));
+  }
 });
-$('aggregateRows').addEventListener('click', async event => {
-  const memberId = event.target.dataset.addManualPoints;
-  if (!memberId) return;
-  const input = document.querySelector(`[data-manual-points-input="${memberId}"]`);
-  const points = Number(input?.value);
-  if (!Number.isInteger(points) || points < 1 || points > 100) return toast('Enter a whole number from 1 to 100.', 'error');
-  event.target.disabled = true;
+
+$('saturdayDateSelect')?.addEventListener('change', async () => {
   try {
-    await withLoader('Adding manual points', `Saving ${points} manual point${points === 1 ? '' : 's'} as stacking records`, async () => {
+    await withLoader('Loading status', 'Updating Saturday attendance status', () => loadUnsubmittedSaturday($('saturdayDateSelect').value));
+  } catch (error) {
+    toast(friendlyError(error, 'Could not load attendance for that date.'), 'error');
+  }
+});
+
+$('refreshUnsubmittedBtn')?.addEventListener('click', async () => {
+  try {
+    await withLoader('Refreshing status', 'Checking latest Saturday attendance', () => loadUnsubmittedSaturday($('saturdayDateSelect')?.value));
+    toast('Saturday attendance status refreshed.');
+  } catch (error) {
+    toast(friendlyError(error, 'Could not refresh attendance status.'), 'error');
+  }
+});
+
+// Member detail form submission: add manual points
+$('memberDetailResult')?.addEventListener('submit', async event => {
+  if (event.target.id !== 'detailManualPointsForm') return;
+  event.preventDefault();
+  const form = event.target;
+  const memberId = form.dataset.memberId;
+  const pointsInput = $('detailPointsInput');
+  const submitBtn = $('detailAddPointsSubmit') || submitButton(form);
+  const points = Number(pointsInput?.value);
+  if (!memberId) return toast('No member selected.', 'error');
+  if (!Number.isInteger(points) || points < 1 || points > 100) return toast('Enter a whole number from 1 to 100.', 'error');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    await withLoader('Adding manual points', `Saving ${points} manual point${points === 1 ? '' : 's'}`, async () => {
       const { data, error } = await supabase.rpc('choir_admin_add_manual_points', { p_user_id: memberId, p_points: points });
       if (error) throw error;
       if (Number(data) !== points) throw new Error('Not all manual points were saved. Please refresh and try again.');
+      await showMemberDetail(memberId);
       await loadAdmin();
+      await loadMember();
     });
     toast(`${points} manual point${points === 1 ? '' : 's'} added.`);
-  } catch (error) { toast(friendlyError(error, 'We could not add the points. Please try again.'), 'error'); }
-  finally { event.target.disabled = false; }
+  } catch (error) {
+    toast(friendlyError(error, 'We could not add the points. Please try again.'), 'error');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 });
+
+// Member detail row deletion: delete manual points or stack rows
+$('memberDetailResult')?.addEventListener('click', async event => {
+  const deleteBtn = event.target.closest('[data-delete-detail-record]');
+  if (!deleteBtn) return;
+  const recordId = deleteBtn.dataset.deleteDetailRecord;
+  const memberId = deleteBtn.dataset.memberId || $('memberDetailSelect').value;
+  if (!recordId || !window.confirm('Delete this attendance record? This cannot be undone.')) return;
+  deleteBtn.disabled = true;
+  try {
+    await withLoader('Deleting record', 'Removing the selected record', async () => {
+      const { error } = await supabase.rpc('choir_admin_delete_stack_row', { p_stack_id: recordId });
+      if (error) throw error;
+      await showMemberDetail(memberId);
+      await loadAdmin();
+      await loadMember();
+    });
+    toast('Record deleted.');
+  } catch (error) {
+    toast(friendlyError(error, 'We could not delete that record. Please try again.'), 'error');
+  } finally {
+    deleteBtn.disabled = false;
+  }
+});
+
 $('pendingRows').addEventListener('click', async event => { const approve = event.target.dataset.approve; const reject = event.target.dataset.reject; if (!approve && !reject) return; if (approve && event.target.dataset.hasSymbol !== 'true') return toast('This member needs a symbol number before you can approve them.', 'error'); const id = approve || reject; const update = approve ? { status: 'approved' } : { status: 'rejected' }; try { await withLoader(approve ? 'Approving member' : 'Rejecting member', 'Updating the member request', async () => { const { error } = await supabase.from('choir_profiles').update(update).eq('id', id); if (error) throw error; const { error: rebuildError } = await supabase.rpc('choir_rebuild_aggregate'); if (rebuildError) throw rebuildError; await loadAdmin(); }); toast(approve ? 'Member approved.' : 'Member rejected.'); } catch (error) { toast(friendlyError(error, 'We could not update this member. Please try again.'), 'error'); } });
 $('lawForm').addEventListener('submit', async event => { event.preventDefault(); const symbol = $('lawSymbol').value.trim(); try { await withLoader('Saving personal law', 'Updating member guidance', async () => { const { data: member, error } = await supabase.from('choir_profiles').select('id').eq('symbolnum', symbol).single(); if (error) throw new Error('No member was found for that symbol.'); const { error: saveError } = await supabase.from('choir_personal_laws').upsert({ user_id: member.id, personal_law: $('lawText').value.trim() }, { onConflict: 'user_id' }); if (saveError) throw saveError; }); event.target.reset(); toast('Personal law saved.'); } catch (error) { toast(friendlyError(error, 'We could not save the personal law. Please try again.'), 'error'); } });
 $('settingsForm').addEventListener('submit', async event => { event.preventDefault(); const month = $('settingMonth').value.trim(); const days = Number($('settingDays').value); try { await withLoader('Saving month settings', 'Keeping aggregate totals unchanged', async () => { const { error } = await supabase.rpc('choir_admin_set_settings', { p_month: month, p_working_days: days }); if (error) throw error; settings.month_name = month; settings.working_days = days; await loadMember(); await loadAdmin(); }); toast('Month settings saved; aggregate totals were kept.'); } catch (error) { toast(friendlyError(error, 'We could not save the month settings. Please try again.'), 'error'); } });
