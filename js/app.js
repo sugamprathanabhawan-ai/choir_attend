@@ -249,18 +249,33 @@ async function boot(activeUser) {
 async function loadMember() {
   text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
   const today = nptDate();
-  const [lawResult, aggregateResult, attendanceResult] = await Promise.all([
+  const [lawResult, aggregateResult, attendanceResult, stackPointsResult] = await Promise.all([
     supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).maybeSingle(),
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
-    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle()
+    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle(),
+    supabase.from('choir_attendance_stack').select('user_id,point,datefilled').lte('datefilled', today)
   ]);
   if (lawResult.error || aggregateResult.error || attendanceResult.error) {
     throw lawResult.error || aggregateResult.error || attendanceResult.error;
   }
   if (lawResult.data) { $('personalLawCard').classList.remove('hidden'); text('personalLaw', lawResult.data.personal_law); }
-  const aggregates = aggregateResult.data || []; const agg = aggregates.find(row => row.user_id === user.id) || { total_points: 0, total_holiday_used: 0, total_attendance_on_time: 0 };
-  $('memberStats').innerHTML = aggregates.map(row => { const isFine = Number(row.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td class="p-3 font-semibold">${escape(row.name)}</td><td class="p-3">${row.total_points}</td><td class="p-3">${row.total_holiday_used}</td><td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="4">No member statistics yet.</td></tr>';
-  text('statsCaption', `All-time aggregate • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}`);
+  const stackPointsByUser = {};
+  (stackPointsResult?.data || []).forEach(row => {
+    stackPointsByUser[row.user_id] = (stackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
+  });
+  const aggregates = (aggregateResult.data || []).map(row => {
+    const calculatedPoints = stackPointsByUser[row.user_id];
+    return {
+      ...row,
+      total_points: calculatedPoints !== undefined ? Math.max(Number(row.total_points) || 0, calculatedPoints) : (Number(row.total_points) || 0)
+    };
+  });
+  const agg = aggregates.find(row => row.user_id === user.id) || { total_points: 0, total_holiday_used: 0, total_attendance_on_time: 0 };
+  if (stackPointsByUser[user.id] !== undefined) {
+    agg.total_points = Math.max(Number(agg.total_points) || 0, stackPointsByUser[user.id]);
+  }
+  $('memberStats').innerHTML = aggregates.map(row => { const isFine = Number(row.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td class="p-3 font-semibold">${escape(row.name)}</td><td class="p-3 font-bold">${row.total_points}</td><td class="p-3">${row.total_holiday_used}</td><td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="4">No member statistics yet.</td></tr>';
+  text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}`);
   const npt = nptNow(); const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
   const alreadySubmitted = Boolean(attendanceResult.data);
   text('attendanceState', alreadySubmitted ? 'Already filled in' : inWindow && profile.status === 'approved' ? 'Form is open' : profile.status === 'approved' ? 'Form is closed' : 'Approval required');
@@ -297,17 +312,33 @@ $('attendanceForm').addEventListener('submit', async event => {
 });
 
 async function loadAdmin() {
+  const today = nptDate();
   // Symbol repair runs in the background so it never delays the board.
   const syncRequest = supabase.rpc('choir_sync_missing_symbols');
-  const [aggregates, stack, pending] = await Promise.all([supabase.from('choir_attendance_aggregate').select('*').order('name'), supabase.from('choir_attendance_stack').select('*').order('datefilled', { ascending: false }).limit(300), supabase.from('choir_profiles').select('id,full_name,email,phone_num,symbolnum').eq('status', 'pending').order('created_at')]);
+  const [aggregates, stack, pending, allPointsResult] = await Promise.all([
+    supabase.from('choir_attendance_aggregate').select('*').order('name'),
+    supabase.from('choir_attendance_stack').select('*').order('datefilled', { ascending: false }).limit(300),
+    supabase.from('choir_profiles').select('id,full_name,email,phone_num,symbolnum').eq('status', 'pending').order('created_at'),
+    supabase.from('choir_attendance_stack').select('user_id,point,datefilled').lte('datefilled', today)
+  ]);
   if (aggregates.error || stack.error || pending.error) return toast(friendlyError(aggregates.error || stack.error || pending.error, 'We could not load the choir board. Please refresh and try again.'), 'error');
   void syncRequest.then(({ error }) => { if (error && error.code !== '42883') console.warn('Symbol sync will retry on the next refresh.', error); });
-  $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="6">No approved members.</td></tr>';
+  const adminStackPointsByUser = {};
+  (allPointsResult?.data || []).forEach(row => {
+    adminStackPointsByUser[row.user_id] = (adminStackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
+  });
+  const adminAggregates = (aggregates.data || []).map(r => {
+    const calculatedPoints = adminStackPointsByUser[r.user_id];
+    return {
+      ...r,
+      total_points: calculatedPoints !== undefined ? Math.max(Number(r.total_points) || 0, calculatedPoints) : (Number(r.total_points) || 0)
+    };
+  });
   $('stackRows').innerHTML = stack.data.map(r => `<tr><td>${escape(r.symbol)}</td><td>${escape(r.datefilled)}</td><td>${escape(r.name)}</td><td>${escape(r.reason || '—')}</td><td>${nptTime(r.time_filled)}</td><td>${r.point}/${r.holiday_used}/${r.attendance_on_time}</td><td><button type="button" data-delete-stack-row="${r.id}" class="rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button></td></tr>`).join('') || '<tr><td colspan="7">No submissions yet.</td></tr>';
-  $('aggregateRows').innerHTML = aggregates.data.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td>${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td class="whitespace-nowrap"><label class="sr-only" for="manual-points-${r.user_id}">Manual points for ${escape(r.name)}</label><input id="manual-points-${r.user_id}" data-manual-points-input="${r.user_id}" type="number" min="1" max="100" step="1" value="1" class="w-16 rounded-lg border border-sky-200 px-2 py-1 text-sm" aria-label="Manual points for ${escape(r.name)}"><button data-add-manual-points="${r.user_id}" class="ml-1 rounded-lg bg-ink px-2 py-1 text-xs font-bold text-white">Add</button></td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="7">No approved members.</td></tr>';
+  $('aggregateRows').innerHTML = adminAggregates.map(r => { const isFine = Number(r.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td>${escape(r.name)}</td><td>${escape(r.symbolnum || '—')}</td><td class="font-bold">${r.total_points}</td><td>${r.total_holiday_used}</td><td>${r.total_attendance_on_time}</td><td class="whitespace-nowrap"><label class="sr-only" for="manual-points-${r.user_id}">Manual points for ${escape(r.name)}</label><input id="manual-points-${r.user_id}" data-manual-points-input="${r.user_id}" type="number" min="1" max="100" step="1" value="1" class="w-16 rounded-lg border border-sky-200 px-2 py-1 text-sm" aria-label="Manual points for ${escape(r.name)}"><button data-add-manual-points="${r.user_id}" class="ml-1 rounded-lg bg-ink px-2 py-1 text-xs font-bold text-white">Add</button></td><td>${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="7">No approved members.</td></tr>';
   const detailSelect = $('memberDetailSelect'); const previouslySelected = detailSelect.value;
-  detailSelect.innerHTML = '<option value="">Choose a member</option>' + aggregates.data.map(r => `<option value="${r.user_id}">${escape(r.name)}${r.symbolnum ? ` (${escape(r.symbolnum)})` : ''}</option>`).join('');
-  if (aggregates.data.some(r => r.user_id === previouslySelected)) detailSelect.value = previouslySelected;
+  detailSelect.innerHTML = '<option value="">Choose a member</option>' + adminAggregates.map(r => `<option value="${r.user_id}">${escape(r.name)}${r.symbolnum ? ` (${escape(r.symbolnum)})` : ''}</option>`).join('');
+  if (adminAggregates.some(r => r.user_id === previouslySelected)) detailSelect.value = previouslySelected;
   $('pendingRows').innerHTML = pending.data.map(r => `<tr><td>${escape(r.full_name)}</td><td>${escape(r.email)}</td><td>${escape(r.phone_num)}</td><td>${escape(r.symbolnum || 'Not provided')}</td><td class="whitespace-nowrap"><button data-approve="${r.id}" data-has-symbol="${r.symbolnum ? 'true' : 'false'}" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Approve</button> <button data-reject="${r.id}" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Reject</button></td></tr>`).join('') || '<tr><td colspan="5">No pending requests.</td></tr>';
   $('settingMonth').value = settings.month_name; $('settingDays').value = settings.working_days;
 }
