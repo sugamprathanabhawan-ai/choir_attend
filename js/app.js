@@ -63,6 +63,7 @@ function friendlyError(error, fallback = 'Something went wrong. Please try again
   if (message.includes('missing attendance can only be marked')) return 'Missing attendance can only be marked after 11:00 PM Nepal time on Saturday.';
   if (message.includes('specified date is not a saturday')) return 'Missing attendance can only be recorded for Saturdays.';
   if (message.includes('check constraint') || message.includes('invalid input')) return 'Please check the information you entered and try again.';
+  if (message.includes('delete requires a where clause')) return 'Database error: Safe-update blocked rebuilding member totals. Please run the SQL fix in Supabase.';
   if (error?.code === 'PGRST116' || message.includes('0 rows')) return 'We could not find your account. Please try logging in again.';
   return fallback;
 }
@@ -280,6 +281,7 @@ $('attendanceForm').addEventListener('submit', async event => {
   catch (requestError) { error = requestError; }
   button.disabled = false;
   if (error) {
+    console.error('Attendance submission error:', error);
     if (error.code === '23505' || String(error.message || '').toLowerCase().includes('duplicate key')) {
       await loadMember();
       return toast('You have already filled in attendance for today.');
