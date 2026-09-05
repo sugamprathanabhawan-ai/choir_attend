@@ -338,23 +338,28 @@ async function boot(activeUser) {
   // The portal is ready now. Load non-essential data without holding up sign-in.
   void signedSelfie();
   void uploadPendingSelfie().then(() => signedSelfie()).catch(error => console.warn('Selfie upload will retry automatically on the next sign-in.', error));
-  void loadMember().catch(error => toast(friendlyError(error, 'We could not load your attendance details. Please refresh and try again.'), 'error'));
+  void loadMember().catch(error => {
+    console.error('loadMember failed:', error);
+    toast(friendlyError(error, 'We could not load your attendance details. Please refresh and try again.'), 'error');
+  });
   if (isAdmin()) { $('adminPanel').classList.remove('hidden'); void loadAdmin(); }
 }
 async function loadMember() {
   text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
   const today = nptDate();
   const [lawResult, aggregateResult, attendanceResult, stackPointsResult, streakRpcResult] = await Promise.all([
-    supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).maybeSingle(),
+    supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).limit(1),
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
-    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle(),
+    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').order('time_filled', { ascending: false }).limit(1),
     supabase.from('choir_attendance_stack').select('user_id,point,datefilled,attendance_on_time,attendance_status').lte('datefilled', today).order('datefilled', { ascending: false }).limit(5000),
-    supabase.rpc('choir_get_member_streaks').catch(() => ({ data: null }))
+    Promise.resolve(supabase.rpc('choir_get_member_streaks')).catch(err => { console.warn('Streak RPC notice:', err); return { data: null }; })
   ]);
-  if (lawResult.error || aggregateResult.error || attendanceResult.error) {
-    throw lawResult.error || aggregateResult.error || attendanceResult.error;
+  if (aggregateResult.error) {
+    console.error('Error fetching choir_attendance_aggregate:', aggregateResult.error);
+    throw aggregateResult.error;
   }
-  if (lawResult.data) { $('personalLawCard').classList.remove('hidden'); text('personalLaw', lawResult.data.personal_law); }
+  const personalLaw = (Array.isArray(lawResult?.data) ? lawResult.data[0]?.personal_law : lawResult?.data?.personal_law) || null;
+  if (personalLaw) { $('personalLawCard').classList.remove('hidden'); text('personalLaw', personalLaw); }
   const stackPointsByUser = {};
   const userAttendanceRecords = {};
   (stackPointsResult?.data || []).forEach(row => {
@@ -463,12 +468,13 @@ async function loadMember() {
   }).join('') || '<tr><td colspan="5" class="py-4 text-center text-slate-500">No member statistics yet.</td></tr>';
   text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}${bonusNote}${streakNote}`);
   const npt = nptNow(); const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
-  const alreadySubmitted = Boolean(attendanceResult.data);
+  const todayAttendance = (Array.isArray(attendanceResult?.data) ? attendanceResult.data[0] : attendanceResult?.data) || null;
+  const alreadySubmitted = Boolean(todayAttendance);
   text('attendanceState', alreadySubmitted ? 'Already filled in' : inWindow && profile.status === 'approved' ? 'Form is open' : profile.status === 'approved' ? 'Form is closed' : 'Approval required');
   const formClosed = alreadySubmitted || !inWindow || profile.status !== 'approved';
   $('attendanceSubmit').disabled = formClosed; $('reasonInput').disabled = formClosed;
   document.querySelectorAll('.status-btn').forEach(button => { button.disabled = formClosed; });
-  if (alreadySubmitted) closeAttendanceForm(attendanceCompleteMessage(attendanceResult.data));
+  if (alreadySubmitted) closeAttendanceForm(attendanceCompleteMessage(todayAttendance));
 }
 $('retryAttendance').addEventListener('click', () => $('attendanceForm').requestSubmit());
 document.querySelectorAll('.status-btn').forEach(button => button.addEventListener('click', () => { selectedStatus = button.dataset.status; document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el === button)); $('reasonWrap').classList.toggle('hidden', selectedStatus !== 'absent'); clearAttendanceResult(); }));
