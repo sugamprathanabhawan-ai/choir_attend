@@ -1,221 +1,806 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Sugam Prathana Bhawan Choir Attendance">
-  <title>Sugam Choir Portal</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config={theme:{extend:{colors:{ink:'#0c4a6e',gold:'#87ceeb'},fontFamily:{sans:['Poppins','sans-serif'],serif:['Playfair Display','serif']}}}}</script>
-</head>
-<body class="min-h-screen bg-sky-50 font-sans text-slate-800">
-  <div id="toast" class="fixed right-5 top-5 z-50 hidden max-w-sm rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-xl"></div>
-  <div id="appLoader" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950/45 p-5 backdrop-blur-sm" role="status" aria-live="polite" aria-busy="true">
-    <div class="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-2xl">
-      <div class="loader-ring mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-2xl text-ink"><i class="fa-solid fa-heart"></i></div>
-      <p id="appLoaderTitle" class="mt-4 font-black text-ink">Please wait</p>
-      <p id="appLoaderMessage" class="mt-1 text-sm text-slate-500">Preparing your choir portal</p>
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const config = window.CHOIRPORTAL_CONFIG;
+if (!config?.url || config.url.includes('YOUR_PROJECT') || !config?.anonKey) {
+  document.body.innerHTML = '<main class="p-8 font-sans"><h1 class="text-2xl font-bold">Supabase setup needed</h1><p class="mt-3">Add your Supabase project URL and anonymous key in js/config.js before publishing.</p></main>';
+  throw new Error('Supabase configuration is missing.');
+}
+const supabase = createClient(config.url, config.anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+let user, profile, settings, selectedStatus = 'present', compressedSelfie, selfiePreparation;
+const $ = id => document.getElementById(id);
+const text = (id, value = '') => { $(id).textContent = value; };
+const THEME_KEY = 'choir_theme';
+function applyTheme(theme) {
+  const dark = theme === 'dark';
+  document.documentElement.classList.toggle('dark-mode', dark);
+  ['darkModeToggle', 'authDarkModeToggle'].forEach(id => {
+    const toggle = $(id);
+    if (!toggle) return;
+    toggle.innerHTML = `<i class="fa-solid fa-${dark ? 'sun' : 'moon'}"></i>`;
+    toggle.setAttribute('aria-label', `Switch to ${dark ? 'light' : 'dark'} mode`);
+    toggle.title = `Switch to ${dark ? 'light' : 'dark'} mode`;
+  });
+}
+const savedTheme = localStorage.getItem(THEME_KEY);
+applyTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+function toggleTheme() {
+  const nextTheme = document.documentElement.classList.contains('dark-mode') ? 'light' : 'dark';
+  localStorage.setItem(THEME_KEY, nextTheme);
+  applyTheme(nextTheme);
+}
+$('darkModeToggle').addEventListener('click', toggleTheme);
+$('authDarkModeToggle').addEventListener('click', toggleTheme);
+const SAVED_LOGIN_KEY = 'choir_saved_login';
+function rememberLogin(email, password) { localStorage.setItem(SAVED_LOGIN_KEY, JSON.stringify({ email, password })); }
+function restoreSavedLogin() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVED_LOGIN_KEY));
+    if (saved?.email && saved?.password) { $('loginEmail').value = saved.email; $('loginSymbol').value = saved.password; }
+  } catch { localStorage.removeItem(SAVED_LOGIN_KEY); }
+}
+function toast(message, type = 'ok') { const el = $('toast'); el.textContent = message; el.className = `fixed right-5 top-5 z-50 max-w-sm rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-xl ${type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`; setTimeout(() => el.classList.add('hidden'), 4500); }
+function friendlyError(error, fallback = 'Something went wrong. Please try again.') {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (error?.code === '23505' || message.includes('duplicate key') || message.includes('already submitted') || message.includes('unique')) return 'You have already filled in attendance for today.';
+  if (message.includes('invalid login credentials')) return 'Your email or symbol number is not correct.';
+  if (message.includes('already registered') || message.includes('already been registered')) return 'An account already uses this email address.';
+  if (message.includes('email not confirmed')) return 'Please confirm your email, then try logging in again.';
+  if (message.includes('invalid email')) return 'Please enter a valid email address.';
+  if (message.includes('password should be') || message.includes('password must')) return 'Your symbol must have at least 6 characters.';
+  if (message.includes('rate limit') || message.includes('too many requests')) return 'Please wait a few minutes, then try again.';
+  if (message.includes('network') || message.includes('fetch') || message.includes('connection')) return 'We could not connect. Please check your internet and try again.';
+  if (message.includes('permission') || message.includes('not allowed') || message.includes('row-level security') || message.includes('administrator access required')) return 'You do not have permission to do that.';
+  if (message.includes('attendance opens only')) return 'Attendance can only be filled in on Saturday from 3:00 AM to 11:00 PM.';
+  if (message.includes('awaiting administrator approval') || message.includes('waiting for approval')) return 'Your account is waiting for approval.';
+  if (message.includes('symbol number does not match')) return 'Your symbol number does not match this account.';
+  if (message.includes('choose present or absent')) return 'Please choose Present or Absent.';
+  if (message.includes('absence reason') || message.includes('tell us why you are absent')) return 'Please tell us why you are absent.';
+  if (message.includes('no member was found') || message.includes('approved member not found')) return 'We could not find that member.';
+  if (message.includes('attendance record not found')) return 'That attendance record has already been removed.';
+  if (message.includes('manual points must')) return 'Enter a whole number from 1 to 100.';
+  if (message.includes('not all manual points')) return 'We could not add all the points. Please try again.';
+  if (message.includes('invalid selfie path') || message.includes('photo')) return 'We could not use that photo. Please choose another one.';
+  if (message.includes('missing attendance can only be marked')) return 'Missing attendance can only be marked after 11:00 PM Nepal time on Saturday.';
+  if (message.includes('specified date is not a saturday')) return 'Missing attendance can only be recorded for Saturdays.';
+  if (message.includes('check constraint') || message.includes('invalid input')) return 'Please check the information you entered and try again.';
+  if (message.includes('delete requires a where clause')) return 'Database error: Safe-update blocked rebuilding member totals. Please run the SQL fix in Supabase.';
+  if (error?.code === 'PGRST116' || message.includes('0 rows')) return 'We could not find your account. Please try logging in again.';
+  return fallback;
+}
+function showLoader(title = 'Please wait', message = 'Preparing your choir portal') { text('appLoaderTitle', title); text('appLoaderMessage', message); $('appLoader').classList.remove('hidden'); $('appLoader').classList.add('flex'); }
+function hideLoader() { $('appLoader').classList.add('hidden'); $('appLoader').classList.remove('flex'); }
+async function withLoader(title, message, action) { showLoader(title, message); try { return await action(); } finally { hideLoader(); } }
+const submitButton = form => form.querySelector('button[type="submit"], button:not([type])');
+function escape(value = '') { const el = document.createElement('span'); el.textContent = value; return el.innerHTML; }
+function nptNow() { return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' })); }
+function nptDate(value = new Date()) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kathmandu', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value); }
+function nptTime(value) { return value ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '—'; }
+function isAdmin() { return profile?.role === 'admin' && profile?.status === 'approved'; }
+function clearAttendanceResult() { $('attendanceResult').classList.add('hidden'); $('retryAttendance').classList.add('hidden'); }
+function showAttendanceResult(title, detail, type = 'success') {
+  const result = $('attendanceResult');
+  result.className = `rounded-xl border p-4 md:col-span-2 ${type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-red-200 bg-red-50 text-red-900'}`;
+  text('attendanceResultTitle', title); text('attendanceResultDetail', detail);
+  $('retryAttendance').classList.toggle('hidden', type === 'success');
+}
+function attendanceResultMessage(record) {
+  if (record.attendance_status === 'absent') return record.point === 1
+    ? 'Your absence has been recorded as 1 point, 1 holiday, and not on time.'
+    : 'Your absence has been recorded as 0 points, 1 holiday, and not on time.';
+  const pointMessage = record.point === 1
+    ? 'You received 1 point because your monthly holiday had already been used.'
+    : record.holiday_used === 1
+      ? 'You received no point because this is the first holiday used this month.'
+      : 'You received no point because you were present on time.';
+  const timeMessage = record.attendance_on_time === 1 ? 'It was recorded on time.' : 'It was recorded after the 9:50 AM on-time deadline.';
+  return `${pointMessage} ${timeMessage}`;
+}
+function attendanceCompleteMessage(record) {
+  if (record?.attendance_status === 'not_filled') {
+    const pointText = Number(record?.point) === 1
+      ? '1 penalty point was added because your monthly holiday had already been used.'
+      : '0 penalty points were added (used your 1 monthly holiday).';
+    return `You did not fill the form before Saturday 11:00 PM Nepal time. A missing attendance record was logged on the rule basis (${pointText})`;
+  }
+  const time = nptTime(record?.time_filled);
+  const completion = time === '—'
+    ? 'You have successfully filled in attendance for this Saturday. The form is now closed for you.'
+    : `You already filled in attendance today at ${time} Nepal time. The form is closed for you.`;
+  return record?.attendance_status === 'present' && Number(record?.attendance_on_time) === 0
+    ? `${completion} You are late! Please be punctual next time.`
+    : completion;
+}
+function closeAttendanceForm(message = 'You have successfully filled in attendance for this Saturday. The form is now closed for you.') {
+  $('attendanceSubmit').disabled = true;
+  $('reasonInput').disabled = true;
+  document.querySelectorAll('.status-btn').forEach(button => { button.disabled = true; });
+  text('attendanceState', 'Already filled in');
+  showAttendanceResult('Attendance complete.', message);
+}
+
+document.querySelectorAll('[data-auth-tab]').forEach(button => button.addEventListener('click', () => showAuth(button.dataset.authTab)));
+function showAuth(tab) { document.querySelectorAll('.auth-form').forEach(el => el.classList.add('hidden')); $(`${tab}Form`).classList.remove('hidden'); document.querySelectorAll('.auth-tab').forEach(el => el.classList.toggle('bg-white', el.dataset.authTab === tab)); }
+showAuth('login');
+restoreSavedLogin();
+const homePill = document.createElement('a'); homePill.href = 'https://sugamchurch.vercel.app/'; homePill.textContent = 'Home'; homePill.className = 'rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-ink hover:bg-slate-200'; const topNavActions = document.querySelector('nav .flex.items-center.gap-3'); if (topNavActions) topNavActions.prepend(homePill);
+const authHomePill = homePill.cloneNode(true); authHomePill.className = 'absolute left-5 top-5 z-10 rounded-full bg-ink px-4 py-2 text-sm font-bold text-white shadow hover:bg-slate-700'; const authView = $('authView'); authView.classList.add('relative'); authView.prepend(authHomePill);
+const loginProgress = document.createElement('div'); loginProgress.id = 'loginProgress'; loginProgress.className = 'login-loader hidden rounded-2xl border border-sky-200 p-4 text-sm text-ink shadow-inner'; loginProgress.innerHTML = '<div class="flex items-center gap-3"><div class="login-loader-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-ink text-lg text-gold shadow-lg"><i class="fa-solid fa-heart"></i></div><div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-3"><p class="font-black tracking-wide">Jesus loves you</p><span class="flex gap-1 text-gold"><i class="login-loader-dot fa-solid fa-circle text-[6px]"></i><i class="login-loader-dot fa-solid fa-circle text-[6px]"></i><i class="login-loader-dot fa-solid fa-circle text-[6px]"></i></span></div><p class="mt-0.5 text-xs font-medium text-slate-500">Preparing your choir space</p></div></div><div class="mt-3 h-2 overflow-hidden rounded-full bg-white/90 shadow-inner"><div class="login-progress-bar h-full w-1/3 rounded-full bg-gradient-to-r from-sky-400 via-gold to-sky-400"></div></div>'; $('loginForm').append(loginProgress);
+
+async function compressImage(file) {
+  if (!file) throw new Error('Please choose a photo.');
+  let source = file;
+  const isHeic = /\.hei[cf]$/i.test(file.name) || /image\/hei[cf]/i.test(file.type);
+  if (isHeic) {
+    try {
+      const { default: heic2any } = await import('https://cdn.jsdelivr.net/npm/heic2any@0.0.4/+esm');
+      source = await heic2any({ blob: file, toType: 'image/jpeg', quality: .9 });
+      if (Array.isArray(source)) source = source[0];
+    } catch (error) {
+      throw new Error('This HEIC photo could not be read. Please save it as JPG or PNG and try again.');
+    }
+  }
+  let image;
+  try { image = await createImageBitmap(source); }
+  catch (error) {
+    const url = URL.createObjectURL(source); image = await new Promise((resolve, reject) => { const el = new Image(); el.onload = () => { URL.revokeObjectURL(url); resolve(el); }; el.onerror = () => { URL.revokeObjectURL(url); reject(new Error('The photo could not be read.')); }; el.src = url; });
+  }
+  let quality = .76; let width = Math.min(image.width, 400); let height = Math.round(image.height * width / image.width);
+  for (let pass = 0; pass < 10; pass++) {
+    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; canvas.getContext('2d').drawImage(image, 0, 0, width, height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (blob && blob.size <= 10 * 1024) return blob;
+    width = Math.round(width * .78); height = Math.round(height * .78); quality = Math.max(.25, quality - .07);
+  }
+  throw new Error('The photo could not be compressed below 10 KB. Please take a simpler, well-lit photo.');
+}
+function savePendingSelfie(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => { sessionStorage.setItem('choir_pending_selfie', reader.result); resolve(); };
+    reader.onerror = () => reject(new Error('The selfie could not be prepared for upload.'));
+    reader.readAsDataURL(blob);
+  });
+}
+async function uploadPendingSelfie() {
+  const encoded = sessionStorage.getItem('choir_pending_selfie'); if (!encoded || !user) return;
+  const blob = await (await fetch(encoded)).blob(); const path = `${user.id}/selfie.jpg`;
+  const { error } = await supabase.storage.from('choir-selfies').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+  if (error) throw error;
+  const { error: profileError } = await supabase.rpc('choir_save_selfie', { p_path: path }); if (profileError) throw profileError;
+  sessionStorage.removeItem('choir_pending_selfie');
+}
+
+$('signupSelfie').addEventListener('change', event => {
+  const form = $('signupForm'); const button = submitButton(form); compressedSelfie = null;
+  selfiePreparation = withLoader('Preparing your selfie', 'Compressing it safely for upload', async () => { compressedSelfie = await compressImage(event.target.files[0]); });
+  button.disabled = true;
+  selfiePreparation.catch(error => { event.target.value = ''; toast(friendlyError(error, 'We could not use that photo. Please choose another one.'), 'error'); }).finally(() => { selfiePreparation = null; button.disabled = false; });
+});
+$('profilePictureInput').addEventListener('change', async event => {
+  const input = event.target;
+  if (!input.files?.[0] || !user) return;
+  input.disabled = true;
+  try {
+    await withLoader('Updating your profile picture', 'Compressing and saving your new photo', async () => {
+      const photo = await compressImage(input.files[0]);
+      const path = `${user.id}/selfie.jpg`;
+      const { error: uploadError } = await supabase.storage.from('choir-selfies').upload(path, photo, { upsert: true, contentType: 'image/jpeg' });
+      if (uploadError) throw uploadError;
+      const { error: profileError } = await supabase.rpc('choir_save_selfie', { p_path: path });
+      if (profileError) throw profileError;
+      profile.selfie_path = path;
+      await signedSelfie();
+    });
+    toast('Your profile picture has been updated.');
+  } catch (error) { toast(friendlyError(error, 'We could not update your profile picture. Please try again.'), 'error'); }
+  finally { input.value = ''; input.disabled = false; }
+});
+$('signupForm').addEventListener('submit', async event => {
+  event.preventDefault(); const name = $('signupName').value.trim(); const phone = $('signupPhone').value.trim(); const email = $('signupEmail').value.trim(); const symbol = $('signupSymbol').value.trim();
+  if (!/^9\d{9}$/.test(phone)) return toast('Use a valid 10-digit Nepali phone number beginning with 9.', 'error');
+  if (!symbol) return toast('Please choose a symbol.', 'error');
+  if (selfiePreparation) return toast('Your selfie is still being prepared. Please wait a moment.', 'error');
+  if (!compressedSelfie) return toast('Please add a selfie; it will be compressed to a 10 KB JPG.', 'error');
+  const button = submitButton(event.currentTarget); button.disabled = true;
+  try { await withLoader('Creating your account', 'Saving your secure member profile', async () => { const { data: available, error: availabilityError } = await supabase.rpc('choir_symbol_available', { p_symbol: symbol }); if (availabilityError) throw availabilityError; if (!available) throw new Error('That symbol is already in use. Please choose another.'); await savePendingSelfie(compressedSelfie); const { error } = await supabase.auth.signUp({ email, password: symbol, options: { data: { full_name: name, phone_num: phone, symbolnum: symbol, accepted_laws: true } } }); if (error) throw error; }); rememberLogin(email, symbol); toast('Account created. Log in with your email and symbol number.'); showAuth('login'); $('loginEmail').value = email; $('loginSymbol').value = symbol; }
+  catch (error) { toast(friendlyError(error, 'We could not create your account. Please try again.'), 'error'); }
+  finally { button.disabled = false; }
+});
+ $('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = submitButton(event.currentTarget); const email = $('loginEmail').value.trim(); const symbol = $('loginSymbol').value.trim(); button.disabled = true; loginProgress.classList.remove('hidden'); try { await withLoader('Signing you in', 'Opening your choir space', async () => { const { data, error } = await supabase.auth.signInWithPassword({ email, password: symbol }); if (error) throw error; rememberLogin(email, symbol); await boot(data.user); }); } catch (error) { toast(friendlyError(error, 'We could not log you in. Please try again.'), 'error'); } finally { loginProgress.classList.add('hidden'); button.disabled = false; } });
+
+function startClock() { const render = () => text('nepalClock', new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format()); render(); setInterval(render, 1000); }
+
+let rulesSliderInitialized = false;
+function initRulesSlider() {
+  if (rulesSliderInitialized) return;
+  const track = $('rulesSliderTrack');
+  const prevBtn = $('sliderPrevBtn');
+  const nextBtn = $('sliderNextBtn');
+  const counter = $('sliderCounter');
+  const dotsContainer = $('sliderDots');
+  if (!track || !prevBtn || !nextBtn || !dotsContainer) return;
+  rulesSliderInitialized = true;
+
+  const slides = track.children;
+  const totalSlides = slides.length;
+  let currentSlide = 0;
+  let autoTimer = null;
+
+  dotsContainer.innerHTML = Array.from({ length: totalSlides }).map((_, i) =>
+    `<button type="button" data-slide-index="${i}" aria-label="Go to rule ${i + 1}" class="h-2 rounded-full transition-all duration-300 ${i === 0 ? 'w-6 bg-blue-600' : 'w-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'}"></button>`
+  ).join('');
+
+  function updateSlider() {
+    track.style.transform = `translateX(-${currentSlide * 100}%)`;
+    if (counter) counter.textContent = `${currentSlide + 1} / ${totalSlides}`;
+    const dots = dotsContainer.querySelectorAll('button');
+    dots.forEach((dot, i) => {
+      if (i === currentSlide) {
+        dot.className = 'h-2 w-6 rounded-full bg-blue-600 transition-all duration-300';
+      } else {
+        dot.className = 'h-2 w-2 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 transition-all duration-300';
+      }
+    });
+  }
+
+  function nextSlide() {
+    currentSlide = (currentSlide + 1) % totalSlides;
+    updateSlider();
+  }
+
+  function prevSlide() {
+    currentSlide = (currentSlide - 1 + totalSlides) % totalSlides;
+    updateSlider();
+  }
+
+  function startAutoSlide() {
+    stopAutoSlide();
+    autoTimer = setInterval(nextSlide, 7000);
+  }
+
+  function stopAutoSlide() {
+    if (autoTimer) {
+      clearInterval(autoTimer);
+      autoTimer = null;
+    }
+  }
+
+  nextBtn.addEventListener('click', () => {
+    nextSlide();
+    startAutoSlide();
+  });
+
+  prevBtn.addEventListener('click', () => {
+    prevSlide();
+    startAutoSlide();
+  });
+
+  dotsContainer.addEventListener('click', e => {
+    const btn = e.target.closest('[data-slide-index]');
+    if (!btn) return;
+    currentSlide = Number(btn.dataset.slideIndex);
+    updateSlider();
+    startAutoSlide();
+  });
+
+  const section = $('rulesSliderSection');
+  if (section) {
+    section.addEventListener('mouseenter', stopAutoSlide);
+    section.addEventListener('mouseleave', startAutoSlide);
+    let touchStartX = 0;
+    section.addEventListener('touchstart', e => {
+      touchStartX = e.changedTouches[0].screenX;
+      stopAutoSlide();
+    }, { passive: true });
+    section.addEventListener('touchend', e => {
+      const touchEndX = e.changedTouches[0].screenX;
+      if (touchStartX - touchEndX > 50) nextSlide();
+      else if (touchEndX - touchStartX > 50) prevSlide();
+      startAutoSlide();
+    }, { passive: true });
+  }
+
+  updateSlider();
+  startAutoSlide();
+}
+
+async function signedSelfie() {
+  const storedPath = profile?.selfie_path?.trim();
+  if (!user) return;
+
+  // Prefer the saved path, but also try the standard file path. This lets a
+  // selfie render even while an older profile row is waiting for its path update.
+  const paths = [...new Set([
+    ...(storedPath ? (storedPath.includes('/') ? [storedPath] : [`${user.id}/${storedPath}`, storedPath]) : []),
+    `${user.id}/selfie.jpg`
+  ])];
+  for (const path of paths) {
+    const { data, error } = await supabase.storage.from('choir-selfies').createSignedUrl(path, 3600);
+    if (!error && data?.signedUrl) {
+      $('navSelfie').removeAttribute('src');
+      $('navSelfie').src = data.signedUrl;
+      return;
+    }
+  }
+  // A newly created profile can briefly exist before its storage object is available.
+  // Keep the neutral avatar instead of showing an alarming error.
+  $('navSelfie').src = `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.full_name || 'Member')}&background=e0f2fe&color=0c4a6e&bold=true`;
+}
+async function boot(activeUser) {
+  if (!activeUser) { const { data } = await supabase.auth.getUser(); activeUser = data.user; }
+  if (!activeUser) return;
+  user = activeUser;
+  const [{ data: nextProfile, error: profileError }, { data: nextSettings, error: settingsError }] = await Promise.all([
+    supabase.from('choir_profiles').select('id,full_name,email,symbolnum,selfie_path,status,role').eq('id', user.id).single(), supabase.from('choir_settings').select('month_name,working_days').eq('id', 1).single()
+  ]); if (profileError || settingsError) return toast(friendlyError(profileError || settingsError, 'We could not open your choir space. Please try again.'), 'error'); profile = nextProfile; settings = nextSettings;
+  $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); text('navEmail', profile.email); text('navName', profile.full_name); text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`); startClock(); initRulesSlider();
+  if (profile.status !== 'approved') $('pendingPanel').classList.remove('hidden');
+  // The portal is ready now. Load non-essential data without holding up sign-in.
+  void signedSelfie();
+  void uploadPendingSelfie().then(() => signedSelfie()).catch(error => console.warn('Selfie upload will retry automatically on the next sign-in.', error));
+  void loadMember().catch(error => toast(friendlyError(error, 'We could not load your attendance details. Please refresh and try again.'), 'error'));
+  if (isAdmin()) { $('adminPanel').classList.remove('hidden'); void loadAdmin(); }
+}
+async function loadMember() {
+  text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
+  const today = nptDate();
+  const [lawResult, aggregateResult, attendanceResult, stackPointsResult] = await Promise.all([
+    supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).maybeSingle(),
+    supabase.from('choir_attendance_aggregate').select('*').order('name'),
+    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle(),
+    supabase.from('choir_attendance_stack').select('user_id,point,datefilled,attendance_on_time,attendance_status').lte('datefilled', today).order('datefilled', { ascending: false })
+  ]);
+  if (lawResult.error || aggregateResult.error || attendanceResult.error) {
+    throw lawResult.error || aggregateResult.error || attendanceResult.error;
+  }
+  if (lawResult.data) { $('personalLawCard').classList.remove('hidden'); text('personalLaw', lawResult.data.personal_law); }
+  const stackPointsByUser = {};
+  const userAttendanceRecords = {};
+  (stackPointsResult?.data || []).forEach(row => {
+    stackPointsByUser[row.user_id] = (stackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
+    if (row.attendance_status !== 'manual') {
+      if (!userAttendanceRecords[row.user_id]) userAttendanceRecords[row.user_id] = [];
+      userAttendanceRecords[row.user_id].push(row);
+    }
+  });
+
+  const activeSatStr = getActiveSaturdayDate();
+  const activeSatDate = new Date(activeSatStr + 'T12:00:00Z');
+  const streakByUser = {};
+
+  Object.entries(userAttendanceRecords).forEach(([userId, records]) => {
+    records.sort((a, b) => b.datefilled.localeCompare(a.datefilled));
+    if (records.length === 0) return;
+
+    const mostRecent = records[0];
+    const mostRecentDate = new Date(mostRecent.datefilled + 'T12:00:00Z');
+    const daysSinceActive = Math.round((activeSatDate - mostRecentDate) / (1000 * 60 * 60 * 24));
+
+    // If most recent record was late or absent, streak is broken
+    if (Number(mostRecent.attendance_on_time) !== 1) {
+      streakByUser[userId] = 0;
+      return;
+    }
+
+    // If latest record is older than previous Saturday (>7 days from active Saturday), streak has expired
+    if (daysSinceActive > 7) {
+      streakByUser[userId] = 0;
+      return;
+    }
+
+    let streak = 0;
+    let prevDate = null;
+    for (const row of records) {
+      if (Number(row.attendance_on_time) !== 1) {
+        break; // Late or absent record breaks continuous streak
+      }
+      const rowDate = new Date(row.datefilled + 'T12:00:00Z');
+      if (prevDate !== null) {
+        const diffDays = Math.round((prevDate - rowDate) / (1000 * 60 * 60 * 24));
+        if (diffDays > 7) {
+          break; // Gap detected between Saturdays
+        }
+      }
+      streak++;
+      prevDate = rowDate;
+    }
+    streakByUser[userId] = streak;
+  });
+
+  const workingDays = Number(settings?.working_days) || 4;
+  const aggregates = (aggregateResult.data || []).map(row => {
+    const rawStackPoints = stackPointsByUser[row.user_id];
+    const onTime = Number(row.total_attendance_on_time) || 0;
+    const onTimeBonus = onTime >= workingDays ? 1 : 0;
+    const basePoints = rawStackPoints !== undefined ? rawStackPoints : (Number(row.total_points) || 0);
+    const totalPoints = rawStackPoints !== undefined ? (basePoints - onTimeBonus) : basePoints;
+    return {
+      ...row,
+      total_points: totalPoints
+    };
+  });
+  const agg = aggregates.find(row => row.user_id === user.id) || { total_points: 0, total_holiday_used: 0, total_attendance_on_time: 0 };
+  if (stackPointsByUser[user.id] !== undefined) {
+    const myOnTime = Number(agg.total_attendance_on_time) || 0;
+    const myBonus = myOnTime >= workingDays ? 1 : 0;
+    agg.total_points = stackPointsByUser[user.id] - myBonus;
+  }
+  const bonusNote = Number(agg.total_attendance_on_time) >= workingDays ? ' (on-time bonus: -1 point applied)' : '';
+  const myStreak = streakByUser[user.id] || 0;
+  const streakNote = myStreak > 0 ? ` • active on-time streak: 🔥 ${myStreak}` : '';
+  $('memberStats').innerHTML = aggregates.map(row => {
+    const isFine = Number(row.total_points) >= 10;
+    const streak = streakByUser[row.user_id] || 0;
+    const streakBadge = streak > 0
+      ? `<span class="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2.5 py-0.5 text-xs font-black text-white shadow-sm shadow-orange-500/20"><span class="text-sm">🔥</span> ${streak}</span>`
+      : '<span class="text-slate-300 dark:text-slate-600 font-bold">—</span>';
+    return `<tr class="${isFine ? 'fine-row' : ''}">
+      <td class="p-3 font-semibold text-slate-900 dark:text-slate-100">${escape(row.name)}</td>
+      <td class="p-3 font-bold text-slate-900 dark:text-slate-100">${row.total_points}</td>
+      <td class="p-3 text-slate-700 dark:text-slate-300">${row.total_holiday_used}</td>
+      <td class="p-3 font-bold text-ink dark:text-sky-300">${row.total_attendance_on_time}</td>
+      <td class="p-3">${streakBadge}</td>
+      <td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6">No member statistics yet.</td></tr>';
+  text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}${bonusNote}${streakNote}`);
+  const npt = nptNow(); const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
+  const alreadySubmitted = Boolean(attendanceResult.data);
+  text('attendanceState', alreadySubmitted ? 'Already filled in' : inWindow && profile.status === 'approved' ? 'Form is open' : profile.status === 'approved' ? 'Form is closed' : 'Approval required');
+  const formClosed = alreadySubmitted || !inWindow || profile.status !== 'approved';
+  $('attendanceSubmit').disabled = formClosed; $('reasonInput').disabled = formClosed;
+  document.querySelectorAll('.status-btn').forEach(button => { button.disabled = formClosed; });
+  if (alreadySubmitted) closeAttendanceForm(attendanceCompleteMessage(attendanceResult.data));
+}
+$('retryAttendance').addEventListener('click', () => $('attendanceForm').requestSubmit());
+document.querySelectorAll('.status-btn').forEach(button => button.addEventListener('click', () => { selectedStatus = button.dataset.status; document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el === button)); $('reasonWrap').classList.toggle('hidden', selectedStatus !== 'absent'); clearAttendanceResult(); }));
+document.querySelector('[data-status="present"]').click();
+$('attendanceForm').addEventListener('submit', async event => {
+  event.preventDefault(); const reason = $('reasonInput').value.trim();
+  if (selectedStatus === 'absent' && reason.length < 3) return toast('Please enter a valid reason for absence.', 'error');
+  const button = $('attendanceSubmit'); button.disabled = true; clearAttendanceResult();
+  let data, error;
+  try { ({ data, error } = await withLoader('Saving attendance', 'Recording your Saturday attendance', () => supabase.rpc('choir_submit_attendance', { p_symbol: profile.symbolnum, p_status: selectedStatus, p_reason: reason || null }))); }
+  catch (requestError) { error = requestError; }
+  button.disabled = false;
+  if (error) {
+    console.error('Attendance submission error:', error);
+    if (error.code === '23505' || String(error.message || '').toLowerCase().includes('duplicate key')) {
+      await loadMember();
+      return toast('You have already filled in attendance for today.');
+    }
+    const message = friendlyError(error, 'We could not save your attendance. Please try again.');
+    showAttendanceResult('Attendance was not saved.', message, 'error');
+    return toast(message, 'error');
+  }
+  showAttendanceResult('Attendance complete.', attendanceCompleteMessage(data));
+  toast('You have successfully filled in attendance for this Saturday.'); event.target.reset(); selectedStatus = 'present';
+  document.querySelectorAll('.status-btn').forEach(el => el.classList.toggle('active', el.dataset.status === 'present'));
+  $('reasonWrap').classList.add('hidden'); closeAttendanceForm(attendanceCompleteMessage(data)); await loadMember();
+});
+
+function getActiveSaturdayDate() {
+  const npt = nptNow();
+  const day = npt.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const diffToSat = (day + 1) % 7; // Sat: 0, Sun: 1, Mon: 2, etc.
+  const sat = new Date(npt.getTime() - diffToSat * 86400000);
+  return nptDate(sat);
+}
+
+async function loadUnsubmittedSaturday(targetDate) {
+  const satDate = targetDate || $('saturdayDateSelect')?.value || getActiveSaturdayDate();
+  if ($('saturdayDateSelect') && $('saturdayDateSelect').value !== satDate) {
+    $('saturdayDateSelect').value = satDate;
+  }
+  const captionEl = $('unsubmittedCaption');
+  if (captionEl) captionEl.textContent = `Approved members who have not yet submitted attendance for Saturday (${satDate}).`;
+
+  const [approvedRes, stackRes] = await Promise.all([
+    supabase.from('choir_profiles').select('id,full_name,symbolnum,email,phone_num').eq('status', 'approved').order('full_name'),
+    supabase.from('choir_attendance_stack').select('user_id,attendance_status').eq('datefilled', satDate)
+  ]);
+
+  if (approvedRes.error || stackRes.error) {
+    console.error('Error loading unsubmitted Saturday attendance:', approvedRes.error || stackRes.error);
+    return;
+  }
+
+  const submittedUserIds = new Set();
+  const autoMarkedUserIds = new Set();
+  (stackRes.data || []).forEach(row => {
+    if (row.attendance_status === 'present' || row.attendance_status === 'absent') {
+      submittedUserIds.add(row.user_id);
+    } else if (row.attendance_status === 'not_filled') {
+      autoMarkedUserIds.add(row.user_id);
+    }
+  });
+
+  const unsubmitted = (approvedRes.data || []).filter(m => !submittedUserIds.has(m.id));
+
+  const countEl = $('unsubmittedCount');
+  if (countEl) {
+    if (unsubmitted.length === 0) {
+      countEl.textContent = 'All submitted';
+      countEl.className = 'rounded-full bg-emerald-100 px-3 py-0.5 text-xs font-bold text-emerald-800';
+    } else {
+      countEl.textContent = `${unsubmitted.length} pending`;
+      countEl.className = 'rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-800';
+    }
+  }
+
+  const rowsEl = $('unsubmittedRows');
+  if (rowsEl) {
+    if (unsubmitted.length === 0) {
+      rowsEl.innerHTML = '<tr><td colspan="5" class="py-6 text-center font-medium text-slate-500">All approved choir members have filled attendance for this Saturday! 🎉</td></tr>';
+    } else {
+      rowsEl.innerHTML = unsubmitted.map(m => {
+        const isAutoMarked = autoMarkedUserIds.has(m.id);
+        const statusBadge = isAutoMarked
+          ? '<span class="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-700">Auto-marked missing</span>'
+          : '<span class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800">Not submitted yet</span>';
+        return `<tr>
+          <td class="font-bold text-ink">${escape(m.full_name)}</td>
+          <td><span class="font-semibold text-slate-700">${escape(m.symbolnum || '—')}</span></td>
+          <td class="text-slate-600">${escape(m.email || '—')}</td>
+          <td class="text-slate-600">${escape(m.phone_num || '—')}</td>
+          <td>${statusBadge}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+}
+
+async function loadAdmin() {
+  const today = nptDate();
+  const npt = nptNow();
+  // Automatically check missing attendance after Saturday 11:00 PM or Sunday
+  if ((npt.getDay() === 6 && npt.getHours() >= 23) || npt.getDay() === 0) {
+    void supabase.rpc('choir_mark_missing_attendance').catch(() => {});
+  }
+  // Symbol repair runs in the background so it never delays the board.
+  const syncRequest = supabase.rpc('choir_sync_missing_symbols');
+  const [aggregates, pending, allPointsResult] = await Promise.all([
+    supabase.from('choir_attendance_aggregate').select('*').order('name'),
+    supabase.from('choir_profiles').select('id,full_name,email,phone_num,symbolnum').eq('status', 'pending').order('created_at'),
+    supabase.from('choir_attendance_stack').select('user_id,point,datefilled').lte('datefilled', today)
+  ]);
+  if (aggregates.error || pending.error) return toast(friendlyError(aggregates.error || pending.error, 'We could not load the choir board. Please refresh and try again.'), 'error');
+  void syncRequest.then(({ error }) => { if (error && error.code !== '42883') console.warn('Symbol sync will retry on the next refresh.', error); });
+  const adminStackPointsByUser = {};
+  (allPointsResult?.data || []).forEach(row => {
+    adminStackPointsByUser[row.user_id] = (adminStackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
+  });
+  const workingDays = Number(settings?.working_days) || 4;
+  const adminAggregates = (aggregates.data || []).map(r => {
+    const rawStackPoints = adminStackPointsByUser[r.user_id];
+    const onTime = Number(r.total_attendance_on_time) || 0;
+    const onTimeBonus = onTime >= workingDays ? 1 : 0;
+    const basePoints = rawStackPoints !== undefined ? rawStackPoints : (Number(r.total_points) || 0);
+    const totalPoints = rawStackPoints !== undefined ? (basePoints - onTimeBonus) : basePoints;
+    return {
+      ...r,
+      total_points: totalPoints
+    };
+  });
+
+  // Load the Saturday unsubmitted attendance table
+  await loadUnsubmittedSaturday($('saturdayDateSelect')?.value);
+
+  const detailSelect = $('memberDetailSelect'); const previouslySelected = detailSelect.value;
+  detailSelect.innerHTML = '<option value="">Choose a member</option>' + adminAggregates.map(r => `<option value="${r.user_id}">${escape(r.name)}${r.symbolnum ? ` (${escape(r.symbolnum)})` : ''}</option>`).join('');
+  if (adminAggregates.some(r => r.user_id === previouslySelected)) detailSelect.value = previouslySelected;
+  $('pendingRows').innerHTML = pending.data.map(r => `<tr><td>${escape(r.full_name)}</td><td>${escape(r.email)}</td><td>${escape(r.phone_num)}</td><td>${escape(r.symbolnum || 'Not provided')}</td><td class="whitespace-nowrap"><button data-approve="${r.id}" data-has-symbol="${r.symbolnum ? 'true' : 'false'}" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Approve</button> <button data-reject="${r.id}" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Reject</button></td></tr>`).join('') || '<tr><td colspan="5">No pending requests.</td></tr>';
+  $('settingMonth').value = settings.month_name; $('settingDays').value = settings.working_days;
+}
+
+function attendanceLabel(row) {
+  return row.attendance_status === 'manual' ? 'Manual point added' : row.attendance_status === 'not_filled' ? 'No form submitted' : row.attendance_status === 'absent' ? 'Absent' : 'Present';
+}
+
+async function showMemberDetail(targetMemberId = null) {
+  const memberId = targetMemberId || $('memberDetailSelect').value;
+  const result = $('memberDetailResult');
+  if (!memberId) return toast('Choose a member first.', 'error');
+  if ($('memberDetailSelect').value !== memberId) {
+    $('memberDetailSelect').value = memberId;
+  }
+  result.innerHTML = '<p class="text-sm text-slate-500">Loading member history…</p>';
+  const { data: rows, error } = await supabase.from('choir_attendance_stack')
+    .select('id,datefilled,month_name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status')
+    .eq('user_id', memberId)
+    .order('datefilled', { ascending: false })
+    .limit(1000);
+  if (error) throw error;
+  const memberName = $('memberDetailSelect').selectedOptions[0]?.textContent || 'Member';
+  const totals = (rows || []).reduce((sum, row) => ({
+    points: sum.points + Number(row.point || 0),
+    holidays: sum.holidays + Number(row.holiday_used || 0),
+    onTime: sum.onTime + Number(row.attendance_on_time || 0)
+  }), { points: 0, holidays: 0, onTime: 0 });
+
+  result.innerHTML = `
+    <div class="grid gap-3 sm:grid-cols-4">
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">Member</p>
+        <p class="mt-1 font-bold truncate">${escape(memberName)}</p>
+      </div>
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">Points received</p>
+        <p class="mt-1 text-2xl font-black">${totals.points}</p>
+      </div>
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">Holidays used</p>
+        <p class="mt-1 text-2xl font-black">${totals.holidays}</p>
+      </div>
+      <div class="rounded-xl bg-sky-50 p-4">
+        <p class="text-xs font-bold uppercase text-sky-700">On time</p>
+        <p class="mt-1 text-2xl font-black">${totals.onTime}</p>
+      </div>
     </div>
-  </div>
 
-  <main id="authView" class="relative mx-auto flex min-h-screen max-w-5xl items-center p-5">
-    <button id="authDarkModeToggle" type="button" class="theme-toggle absolute right-5 top-5 z-20" aria-label="Switch to dark mode" title="Switch to dark mode"><i class="fa-solid fa-moon"></i></button>
-    <div class="grid w-full overflow-hidden rounded-3xl bg-white shadow-2xl md:grid-cols-5">
-      <section class="auth-showcase bg-ink p-8 text-white md:col-span-2 md:p-12">
-        <div class="brand-mark"><i class="fa-solid fa-music"></i></div>
-        <p class="mt-7 text-xs font-bold uppercase tracking-[.28em] text-gold">Sugam Prathana Bhawan</p>
-        <h1 class="mt-4 text-4xl font-black leading-tight">Choir life,<br><span class="text-gold">in harmony.</span></h1>
-        <p class="mt-5 text-slate-200">A bright, simple home for attendance, personal guidance, and the choir board.</p>
-        <div class="mt-8 grid grid-cols-2 gap-3 text-sm"><div class="feature-chip"><i class="fa-solid fa-calendar-check"></i><span>Easy attendance</span></div><div class="feature-chip"><i class="fa-solid fa-heart"></i><span>Made for choir</span></div></div>
-        <div class="mt-8 rounded-2xl border border-white/15 bg-white/10 p-5 text-sm leading-6"><b>Before continuing:</b> please read the <a href="https://sugamchurch.vercel.app/law/SUGAM%20CHOIR%20LAWS.pdf" target="_blank" rel="noopener noreferrer" class="font-bold text-gold underline">Sugam Choir laws (PDF)</a> and accept them only if you agree.</div>
-      </section>
-      <section class="p-7 md:col-span-3 md:p-10">
-        <div class="mb-7 flex rounded-xl bg-slate-100 p-1"><button data-auth-tab="login" class="auth-tab flex-1 rounded-lg px-4 py-2 text-sm font-bold">Login</button><button data-auth-tab="signup" class="auth-tab flex-1 rounded-lg px-4 py-2 text-sm font-bold">Sign up</button></div>
-        <form id="loginForm" class="auth-form space-y-4">
-          <div><label class="label">Email</label><input id="loginEmail" type="email" autocomplete="email" required placeholder="Enter your email address" class="input"></div>
-          <div><label class="label">Symbol number</label><input id="loginSymbol" type="text" inputmode="numeric" autocomplete="current-password" required placeholder="Enter your symbol number" class="input"><p class="mt-2 text-xs text-slate-500">Use the symbol number you chose during sign-up.</p></div>
-          <button class="primary-btn w-full">Log in</button>
-        </form>
-        <form id="signupForm" class="auth-form hidden space-y-4">
-          <div><label class="label">Full name <span class="text-red-600">*</span></label><input id="signupName" required class="input"></div>
-          <div><label class="label">Nepali phone number <span class="text-red-600">*</span></label><input id="signupPhone" inputmode="numeric" pattern="9[0-9]{9}" placeholder="98XXXXXXXX" required class="input"></div>
-          <div><label class="label">Email <span class="text-red-600">*</span></label><input id="signupEmail" type="email" required class="input"></div>
-          <div><label class="label">Choose a unique symbol <span class="text-red-600">*</span></label><input id="signupSymbol" type="text" autocomplete="off" minlength="1" required placeholder="Your choir symbol" class="input"><p class="mt-1 text-xs text-slate-500">This symbol is your login credential and cannot be used by another member.</p></div>
-          <div><label class="label">Profile picture <span class="text-red-600">*</span></label><input id="signupSelfie" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif" required class="block w-full text-sm"><p class="mt-1 text-xs text-slate-500">Choose a photo from your gallery or take a new one. JPEG, JPG, PNG, and HEIC are accepted and compressed privately.</p></div>
-          <label class="flex gap-3 rounded-xl bg-amber-50 p-3 text-sm"><input id="acceptLaws" type="checkbox" required class="mt-1 h-4 w-4"><span>I accept the laws of the church and choir board specified in the choir laws document.</span></label>
-          <button class="primary-btn w-full">Create account</button>
-        </form>
-      </section>
+    <!-- Manual Point Entry Directly in Member Detail -->
+    <div class="mt-4 rounded-xl border border-sky-100 bg-sky-50/70 p-4">
+      <form id="detailManualPointsForm" data-member-id="${memberId}" class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 class="text-sm font-bold text-ink">Give manual points</h3>
+          <p class="text-xs text-slate-500">Add manual point(s) to this member as stacking records.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label for="detailPointsInput" class="text-xs font-bold uppercase text-slate-500">Points:</label>
+          <input id="detailPointsInput" type="number" min="1" max="100" step="1" value="1" required class="input w-20 py-1.5 px-3 text-center text-sm font-bold" aria-label="Manual points to add">
+          <button id="detailAddPointsSubmit" type="submit" class="primary-btn py-1.5 px-4 text-xs font-bold whitespace-nowrap shadow-sm">
+            <i class="fa-solid fa-plus mr-1"></i> Add points
+          </button>
+        </div>
+      </form>
     </div>
-  </main>
 
-  <main id="appView" class="hidden min-h-screen">
-    <nav class="sticky top-0 z-40 border-b bg-white/80 backdrop-blur-xl"><div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-5"><div class="flex min-w-0 items-center gap-2 sm:gap-3"><div class="nav-mark shrink-0"><i class="fa-solid fa-music"></i></div><div class="min-w-0"><p class="text-sm font-black text-ink">SUGAM <span class="text-gold">CHOIR</span></p><p id="navEmail" class="max-w-28 truncate text-xs text-slate-500 sm:max-w-none"></p></div></div><div class="flex shrink-0 items-center gap-2 sm:gap-3"><button id="darkModeToggle" type="button" class="theme-toggle" aria-label="Switch to dark mode" title="Switch to dark mode"><i class="fa-solid fa-moon"></i></button><img id="navSelfie" class="h-10 w-10 rounded-2xl bg-slate-200 object-cover" alt="Your selfie"><span id="navName" class="hidden text-sm font-bold sm:inline"></span><button id="logoutBtn" class="logout-btn"><i class="fa-solid fa-arrow-right-from-bracket"></i><span class="hidden sm:inline">Log out</span></button></div></div></nav>
-    <div class="mx-auto max-w-7xl p-5 md:p-8">
-      <section id="pendingPanel" class="hidden rounded-2xl border border-amber-300 bg-amber-50 p-5"><b>Thank you.</b> Please wait for the administrator to accept your request. You can sign in, but attendance opens after approval.</section>
-      <section id="memberPanel" class="space-y-6">
-        <div class="grid gap-6 lg:grid-cols-3"><div class="hero-time rounded-2xl bg-ink p-6 text-white lg:col-span-1"><div class="flex items-center justify-between"><p class="text-xs font-bold uppercase tracking-widest text-slate-200">Live Nepal time</p><i class="fa-regular fa-clock text-gold"></i></div><p id="nepalClock" class="mt-3 text-3xl font-black">--:--:--</p><p id="monthLabel" class="mt-4 text-sm text-slate-200"></p></div><div id="personalLawCard" class="hidden rounded-2xl border border-indigo-100 bg-indigo-50 p-6 lg:col-span-2"><p class="text-xs font-bold uppercase tracking-widest text-indigo-500">Personal law / guidance</p><p id="personalLaw" class="mt-3 whitespace-pre-line leading-7"></p></div></div>
-        <section class="rounded-2xl bg-white p-6 shadow-sm"><h2 class="text-2xl font-black">Profile picture</h2><p class="mt-1 text-sm text-slate-500">Choose a new photo from your gallery or take a new one.</p><label class="secondary-btn mt-4 inline-flex cursor-pointer items-center gap-2"><i class="fa-solid fa-image"></i> Update profile picture<input id="profilePictureInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif"></label></section>
-        <!-- Interactive Attendance Rules Slider for Lay Members -->
-        <section id="rulesSliderSection" class="relative overflow-hidden rounded-2xl bg-white p-6 shadow-sm">
-          <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-center gap-2.5">
-              <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                <i class="fa-solid fa-book-open"></i>
-              </div>
-              <div>
-                <h2 class="text-xl font-black text-ink">Choir Attendance Guide</h2>
-                <p class="text-xs text-slate-500">Swipe or click through to easily understand all attendance rules & rewards</p>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 self-end sm:self-auto">
-              <button id="sliderPrevBtn" type="button" aria-label="Previous rule" class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
-                <i class="fa-solid fa-chevron-left text-xs"></i>
-              </button>
-              <span id="sliderCounter" class="text-xs font-bold text-slate-500 px-1">1 / 6</span>
-              <button id="sliderNextBtn" type="button" aria-label="Next rule" class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
-                <i class="fa-solid fa-chevron-right text-xs"></i>
-              </button>
-            </div>
-          </div>
-          <div class="relative w-full overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800">
-            <div id="rulesSliderTrack" class="flex w-full" style="display: flex; width: 100%; transition: transform 0.5s cubic-bezier(0.2, 1, 0.3, 1); will-change: transform;">
-              <!-- Slide 1: Operating Window -->
-              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-blue-50/90 via-white to-sky-50/70 dark:from-blue-950/40 dark:via-slate-900/50 dark:to-slate-900/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/25 text-2xl">
-                    <i class="fa-solid fa-calendar-check"></i>
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">Rule 1 • Saturdays</span>
-                      <span class="text-xs font-semibold text-slate-400">3:00 AM – 11:00 PM</span>
-                    </div>
-                    <h3 class="mt-1 text-lg font-black text-slate-900 dark:text-white">When is attendance open?</h3>
-                    <p class="mt-1 text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed">
-                      Attendance opens <b>every Saturday from 3:00 AM to 11:00 PM Nepal Time</b>. Choose <b>Present</b> or <b>Absent</b> directly from your phone.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <!-- Slide 2: 9:50 AM Deadline, On-Time Score & Continuous Streaks -->
-              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-amber-50/90 via-white to-orange-50/70 dark:from-amber-950/40 dark:via-slate-900/50 dark:to-slate-900/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-md shadow-amber-500/25 text-2xl">
-                    <i class="fa-solid fa-fire"></i>
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">Rule 2 • On-Time & Continuous Streak</span>
-                      <span class="text-xs font-semibold text-slate-400">9:50 AM Cutoff</span>
-                    </div>
-                    <h3 class="mt-1 text-lg font-black text-slate-900 dark:text-white">Continuous On-Time Streak & Score</h3>
-                    <p class="mt-1 text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed">
-                      Submit before or at <b>9:50 AM</b> to earn an <b>On-Time point</b>. When you submit on time Saturday after Saturday <b>continuously without a single gap</b>, you earn and grow your <b>🔥 On-Time Streak</b>! If you miss or submit late, your streak resets (shows —), but your <b>monthly On-Time number</b> is always saved and shown in the table.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <!-- Slide 3: 1 Free Monthly Holiday -->
-              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/70 dark:from-emerald-950/40 dark:via-slate-900/50 dark:to-slate-900/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-500/25 text-2xl">
-                    <i class="fa-solid fa-gift"></i>
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">Rule 3 • Free Holiday</span>
-                      <span class="text-xs font-semibold text-slate-400">0 Points</span>
-                    </div>
-                    <h3 class="mt-1 text-lg font-black text-slate-900 dark:text-white">1 Free Holiday each month</h3>
-                    <p class="mt-1 text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed">
-                      Every month, your <b>first absent or late submission costs 0 penalty points</b>! It simply uses your 1 monthly allowed holiday so you are never penalized for occasional emergencies.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <!-- Slide 4: Penalty Points & Fines -->
-              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-rose-50/90 via-white to-pink-50/70 dark:from-rose-950/40 dark:via-slate-900/50 dark:to-slate-900/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-md shadow-rose-500/25 text-2xl">
-                    <i class="fa-solid fa-triangle-exclamation"></i>
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-md bg-rose-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-rose-800 dark:bg-rose-900/60 dark:text-rose-300">Rule 4 • Penalty Points</span>
-                      <span class="text-xs font-semibold text-slate-400">+1 Point each</span>
-                    </div>
-                    <h3 class="mt-1 text-lg font-black text-slate-900 dark:text-white">Watch out for penalty points!</h3>
-                    <p class="mt-1 text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed">
-                      If you've already used your free holiday for the month, any subsequent late or absent attendance adds <b>+1 penalty point</b>. Accumulating <b>10 points</b> leads to an official choir <b>Fine</b>.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <!-- Slide 5: -1 Point Perfect Attendance Bonus -->
-              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-purple-50/90 via-white to-violet-50/70 dark:from-purple-950/40 dark:via-slate-900/50 dark:to-slate-900/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-purple-600 text-white shadow-md shadow-purple-500/25 text-2xl">
-                    <i class="fa-solid fa-award"></i>
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-md bg-purple-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-purple-800 dark:bg-purple-900/60 dark:text-purple-300">Rule 5 • Reward Bonus</span>
-                      <span class="text-xs font-semibold text-slate-400">-1 Point applied</span>
-                    </div>
-                    <h3 class="mt-1 text-lg font-black text-slate-900 dark:text-white">Earn a -1 Point bonus reward!</h3>
-                    <p class="mt-1 text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed">
-                      If you attend on time for <b>all working Saturdays in a month</b> (e.g. 4 on-time attendances in a 4-Saturday month), you earn an automatic <b>-1 point deduction</b> from your total points!
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <!-- Slide 6: Auto-Marking at 11:00 PM -->
-              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-indigo-50/90 via-white to-slate-50/70 dark:from-indigo-950/40 dark:via-slate-900/50 dark:to-slate-900/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
-                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/25 text-2xl">
-                    <i class="fa-solid fa-moon"></i>
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300">Rule 6 • Saturday 11:00 PM</span>
-                      <span class="text-xs font-semibold text-slate-400">Auto-assigned</span>
-                    </div>
-                    <h3 class="mt-1 text-lg font-black text-slate-900 dark:text-white">Forgot to fill the form?</h3>
-                    <p class="mt-1 text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed">
-                      At <b>11:00 PM Saturday</b>, missing forms are automatically recorded on the rule basis. If you still have your free holiday, it uses it (0 pts); if already used, it adds 1 point. Always submit during the day!
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- Dot Indicators -->
-          <div id="sliderDots" class="mt-3.5 flex items-center justify-center gap-1.5"></div>
-        </section>
-        <section class="rounded-2xl bg-white p-6 shadow-sm"><div class="mb-5 flex items-center justify-between"><div><h2 class="text-2xl font-black">Saturday attendance</h2><p class="text-sm text-slate-500">Opens only on Saturday for a whole day.</p></div><span id="attendanceState" class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold"></span></div><form id="attendanceForm" class="grid gap-5 md:grid-cols-2"><div><p class="label">Your symbol number</p><p id="memberSymbol" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold text-ink">Not assigned yet</p><p class="mt-2 text-xs text-slate-500">This is linked to your signed-in account.</p></div><div><label class="label">Attendance</label><div class="flex gap-3"><button data-status="present" type="button" class="status-btn flex-1 rounded-xl border-2 p-3 font-bold">Present</button><button data-status="absent" type="button" class="status-btn flex-1 rounded-xl border-2 p-3 font-bold">Absent</button></div></div><div id="reasonWrap" class="hidden md:col-span-2"><label class="label">Why are you absent? <span class="text-red-600">*</span></label><textarea id="reasonInput" class="input min-h-24" placeholder="Enter a valid reason"></textarea></div><button id="attendanceSubmit" class="primary-btn md:col-span-2" type="submit">Submit attendance</button><div id="attendanceResult" class="hidden rounded-xl border p-4 md:col-span-2" role="status" aria-live="polite"><p id="attendanceResultTitle" class="font-bold"></p><p id="attendanceResultDetail" class="mt-1 text-sm"></p><button id="retryAttendance" type="button" class="secondary-btn mt-3 hidden">Retry attendance</button></div></form></section>
-        <section class="rounded-2xl bg-white p-6 shadow-sm"><h2 class="text-2xl font-black">Statistics</h2><p id="statsCaption" class="mt-1 text-sm text-slate-500"></p><div class="mt-5 overflow-x-auto"><table class="w-full text-left text-sm"><thead class="border-b text-xs uppercase text-slate-500"><tr><th class="p-3">Name</th><th class="p-3">Total points</th><th class="p-3">Holiday used</th><th class="p-3">On-time (Month)</th><th class="p-3">On-time streak</th><th class="p-3">Status</th></tr></thead><tbody id="memberStats"></tbody></table></div></section>
-
-
-      </section>
-      <section id="adminPanel" class="hidden space-y-6"><div class="flex items-end justify-between"><div><p class="text-xs font-bold uppercase tracking-widest text-gold">Administrator</p><h1 class="text-3xl font-black">Choir board</h1></div><div class="flex items-center gap-2"><button id="markMissingBtn" type="button" class="secondary-btn"><i class="fa-solid fa-user-clock"></i> Mark missing</button><button id="syncDataBtn" type="button" class="secondary-btn">Refresh</button></div></div><section class="rounded-2xl bg-white p-6 shadow-sm"><div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div class="flex items-center gap-3"><h2 class="text-xl font-black">Saturday attendance pending</h2><span id="unsubmittedCount" class="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-800">0 pending</span></div><p id="unsubmittedCaption" class="mt-1 text-sm text-slate-500">Approved members who have not yet filled attendance for Saturday.</p></div><div class="flex items-center gap-2"><label for="saturdayDateSelect" class="text-xs font-bold uppercase text-slate-500">Date:</label><input id="saturdayDateSelect" type="date" class="input w-auto py-1.5 px-3 text-sm"><button id="refreshUnsubmittedBtn" type="button" class="secondary-btn py-1.5 px-3 text-xs" title="Refresh attendance status"><i class="fa-solid fa-arrows-rotate"></i></button></div></div><div class="table-wrap mt-4"><table><thead><tr><th>Name</th><th>Symbol</th><th>Email</th><th>Phone</th><th>Status</th></tr></thead><tbody id="unsubmittedRows"></tbody></table></div></section>
-        <section class="rounded-2xl bg-white p-6 shadow-sm"><div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h2 class="text-xl font-black">Member detail</h2><p class="mt-1 text-sm text-slate-500">Choose a member to see every attendance record, point, and holiday used.</p></div><div class="flex w-full gap-2 sm:w-auto"><label class="sr-only" for="memberDetailSelect">Member</label><select id="memberDetailSelect" class="input min-w-0 sm:w-64" aria-label="Choose a member"></select><button id="memberDetailBtn" type="button" class="primary-btn whitespace-nowrap">Details</button></div></div><div id="memberDetailResult" class="mt-5" aria-live="polite"><p class="text-sm text-slate-500">Choose a member and select Details.</p></div></section>
-        <section class="rounded-2xl bg-white p-6 shadow-sm"><h2 class="text-xl font-black">New member requests</h2><p class="mt-1 text-sm text-slate-500">The member's submitted symbol number is final.</p><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Symbol number</th><th>Action</th></tr></thead><tbody id="pendingRows"></tbody></table></div></section>
-        <div class="grid gap-6 lg:grid-cols-2"><section class="rounded-2xl bg-white p-6 shadow-sm"><h2 class="text-xl font-black">Personal law</h2><form id="lawForm" class="mt-4 space-y-3"><input id="lawSymbol" class="input" placeholder="Symbol number" required><textarea id="lawText" class="input min-h-28" placeholder="Personal law for this member" required></textarea><button class="primary-btn">Save personal law</button></form></section><section class="rounded-2xl bg-white p-6 shadow-sm"><h2 class="text-xl font-black">Working month</h2><form id="settingsForm" class="mt-4 space-y-3"><input id="settingMonth" class="input" placeholder="Month name" required><input id="settingDays" type="number" min="1" max="6" class="input" placeholder="Working Saturdays (e.g. 4)" required><button class="primary-btn">Save month settings</button></form><div class="mt-6 border-t pt-5"><p class="text-sm text-slate-500">Export the active month data.</p><button id="csvExport" class="secondary-btn mt-2">Download CSV</button><p class="mt-2 text-xs text-slate-500">For administrator-generated Excel (.xlsx) and CSV files, use the Sugam Choir menu in the connected Google Sheet.</p></div></section></div>
-      </section>
+    <div class="table-wrap mt-4">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Month</th>
+            <th>Attendance</th>
+            <th>Reason / point source</th>
+            <th>Time</th>
+            <th>Point</th>
+            <th>Holiday</th>
+            <th>On time</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(rows || []).map(row => `
+            <tr>
+              <td>${escape(row.datefilled)}</td>
+              <td>${escape(row.month_name)}</td>
+              <td><span class="${row.attendance_status === 'manual' ? 'font-semibold text-purple-700' : ''}">${escape(attendanceLabel(row))}</span></td>
+              <td>${escape(row.reason || '—')}</td>
+              <td>${nptTime(row.time_filled)}</td>
+              <td class="font-bold">${row.point}</td>
+              <td>${row.holiday_used}</td>
+              <td>${row.attendance_on_time}</td>
+              <td>
+                <button type="button" data-delete-detail-record="${row.id}" data-member-id="${memberId}" class="rounded-lg bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 hover:bg-red-100 transition">
+                  Delete
+                </button>
+              </td>
+            </tr>
+          `).join('') || '<tr><td colspan="9" class="py-4 text-center text-slate-500">No attendance records for this member.</td></tr>'}
+        </tbody>
+      </table>
     </div>
-  </main>
-  <section id="laws" class="mx-auto max-w-5xl px-6 pb-12 text-sm text-slate-600"><h2 class="text-xl font-black text-ink">Sugam Choir laws</h2><p class="mt-2">Members must read and accept the <a href="https://sugamchurch.vercel.app/law/SUGAM%20CHOIR%20LAWS.pdf" target="_blank" rel="noopener noreferrer" class="font-bold text-ink underline">Sugam Choir laws PDF</a> before creating an account.</p></section>
-  <script src="./js/config.js"></script>
-  <script type="module" src="./js/app.js?v=20260905-ontime-streak-fire-rules-slider"></script>
-  <style>
-    :root{--ink:#182659;--violet:#6d4aff;--pink:#fa5ca8;--cyan:#2dcdf3;--lime:#a6ea62;--paper:#f7f8ff}*{scrollbar-color:#b7b9ff transparent;scrollbar-width:thin}body{background:radial-gradient(circle at 8% 7%,#d8efff 0,transparent 24rem),radial-gradient(circle at 91% 13%,#f9d9f5 0,transparent 25rem),linear-gradient(135deg,#f7f9ff 0%,#f1f5ff 50%,#fff8fc 100%);min-height:100vh}.input{width:100%;border:1px solid #e1e5f5;border-radius:1rem;padding:.8rem 1rem;outline:none;background:#fbfcff;color:#182659;transition:border .2s,box-shadow .2s,transform .2s}.input:hover{border-color:#c6c8ff}.input:focus{border-color:#6d4aff;box-shadow:0 0 0 4px #6d4aff1c;background:#fff}.label{display:block;margin-bottom:.45rem;font-size:.74rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#66709a}.primary-btn{position:relative;overflow:hidden;border-radius:9999px;background:linear-gradient(115deg,#6d4aff,#8756ff 45%,#fa5ca8);padding:.85rem 1.3rem;color:#fff;font-weight:800;box-shadow:0 10px 22px #6d4aff42;transition:transform .2s,box-shadow .2s}.primary-btn:before{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,#ffffff55 50%,transparent 70%);transform:translateX(-120%);transition:transform .5s}.primary-btn:hover{transform:translateY(-2px);box-shadow:0 15px 28px #6d4aff55}.primary-btn:hover:before{transform:translateX(120%)}.secondary-btn,.logout-btn{display:inline-flex;align-items:center;gap:.5rem;border-radius:9999px;background:#eff0ff;padding:.7rem 1rem;font-size:.875rem;font-weight:800;color:#4333a1;transition:.2s}.secondary-btn:hover,.logout-btn:hover{background:#dedaff;transform:translateY(-1px)}.status-btn{border-color:#e3e6f4!important;background:#fafbff;color:#4e5881;transition:.2s}.status-btn:hover{border-color:#9a8cff!important;transform:translateY(-2px)}.status-btn.active{border-color:#6d4aff!important;background:linear-gradient(125deg,#6d4aff,#8e64ff)!important;color:white;box-shadow:0 8px 18px #6d4aff38}.table-wrap{margin-top:1rem;overflow:auto;max-height:24rem;border:1px solid #e7e9f4;border-radius:1.1rem;background:#fff;box-shadow:inset 0 1px #fff}.table-wrap table{width:100%;font-size:.8rem}.table-wrap th,.table-wrap td{padding:.8rem;text-align:left;border-bottom:1px solid #f0f1f8}.table-wrap tbody tr{transition:background .15s}.table-wrap tbody tr:hover{background:#f8f7ff}.table-wrap th{position:sticky;top:0;background:#f5f4ff;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:#6856a4}#authView>div{border:1px solid #ffffffb5;box-shadow:0 28px 70px #4d4a9f2b;backdrop-filter:blur(12px)}.auth-showcase{position:relative;overflow:hidden;background:linear-gradient(145deg,#202c64,#643fb6 58%,#e85ba2)!important}.auth-showcase:before,.auth-showcase:after{content:'';position:absolute;border-radius:999px;background:#ffffff14}.auth-showcase:before{width:20rem;height:20rem;right:-11rem;top:-6rem}.auth-showcase:after{width:14rem;height:14rem;left:-7rem;bottom:-7rem}.auth-showcase>*{position:relative;z-index:1}.brand-mark,.nav-mark{display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,#fff6a9,#a6ea62);color:#35411d;box-shadow:0 10px 30px #b3ec6870}.brand-mark{height:3.5rem;width:3.5rem;border-radius:1.15rem;font-size:1.4rem;transform:rotate(-7deg)}.nav-mark{height:2.5rem;width:2.5rem;border-radius:.85rem}.feature-chip{display:flex;align-items:center;gap:.55rem;border:1px solid #ffffff2b;background:#ffffff12;border-radius:.85rem;padding:.75rem;font-weight:600;backdrop-filter:blur(6px)}.feature-chip i{color:#d8ff91}.hero-time{position:relative;overflow:hidden;background:linear-gradient(135deg,#26356f,#6043bb)!important;box-shadow:0 15px 35px #46368e36}.hero-time:after{content:'';position:absolute;width:10rem;height:10rem;right:-4rem;bottom:-6rem;border-radius:999px;background:#fa8fc630}.hero-time>*{position:relative;z-index:1}#appView nav{border-color:#ffffffb0!important;box-shadow:0 4px 20px #5f6aa10d}#appView .rounded-2xl.bg-white{border:1px solid #ffffff;background:#ffffffd9!important;box-shadow:0 12px 32px #4c558a14;backdrop-filter:blur(12px);transition:transform .2s,box-shadow .2s}#appView .rounded-2xl.bg-white:hover{box-shadow:0 16px 38px #4c558a1d}#appView h1,#appView h2{font-family:'Playfair Display',serif;color:#202a62}.fine-row{background:#fff0f6!important}.fine-badge{border-radius:999px;background:linear-gradient(110deg,#f43f73,#fb6ca9);padding:.25rem .6rem;color:#fff;font-size:.68rem;font-weight:800}.loader-ring{background:linear-gradient(140deg,#e1ddff,#ffe0f0)!important;color:#6d4aff;animation:loaderPulse 1.15s ease-in-out infinite}.auth-tab{color:#6d7193;transition:.2s}.auth-tab.bg-white{color:#4d35c8;box-shadow:0 4px 12px #6562a51a}.login-loader{position:relative;overflow:hidden;background:linear-gradient(135deg,#f2f0ff,#fff6fb 55%,#e8fbff)}.login-loader:before{content:'';position:absolute;inset:-70% -25%;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.78) 50%,transparent 60%);animation:loginShimmer 1.8s linear infinite}.login-loader>*{position:relative}.login-loader-icon{background:linear-gradient(140deg,#6d4aff,#fa5ca8)!important;color:#fff;animation:loginFloat 1.7s ease-in-out infinite}.login-progress-bar{animation:loginProgress 1.35s ease-in-out infinite}.login-loader-dot{animation:loginDot 1.1s ease-in-out infinite}@keyframes loaderPulse{50%{transform:scale(1.12);box-shadow:0 0 0 12px #eeeaff}}@keyframes loginProgress{from{transform:translateX(-115%)}to{transform:translateX(330%)}}@keyframes loginShimmer{to{transform:translateX(70%)}}@keyframes loginFloat{50%{transform:translateY(-4px) scale(1.04)}}@keyframes loginDot{50%{opacity:.25;transform:translateY(-2px)}}@media(max-width:640px){#authView{padding:1rem}.auth-showcase{padding:2rem}.feature-chip{font-size:.75rem}#appView .rounded-2xl.bg-white{border-radius:1.2rem}}
-    /* Blue palette and saved dark theme */
-    :root{--ink:#0b2a5b;--violet:#1769e0;--pink:#38bdf8;--cyan:#22d3ee;--lime:#93c5fd;--paper:#f5f9ff}.primary-btn{background:linear-gradient(115deg,#0f4fc1,#1684e8 48%,#22c2ee);box-shadow:0 10px 22px #0f65ce42}.primary-btn:hover{box-shadow:0 15px 28px #0f65ce55}.secondary-btn,.logout-btn{background:#e5f2ff;color:#1456a0}.secondary-btn:hover,.logout-btn:hover{background:#cfe8ff}.status-btn.active{border-color:#1769e0!important;background:linear-gradient(125deg,#0e55c7,#1684e8)!important;box-shadow:0 8px 18px #1769e038}.table-wrap th{background:#edf6ff;color:#2962a9}.table-wrap tbody tr:hover{background:#f2f8ff}.auth-showcase{background:linear-gradient(145deg,#082a61,#0f5bbb 58%,#1aa8dc)!important}.hero-time{background:linear-gradient(135deg,#0b3474,#1268c9)!important;box-shadow:0 15px 35px #0b55a536}.hero-time:after{background:#67d8ff30}.brand-mark,.nav-mark{background:linear-gradient(140deg,#e6f7ff,#7dd3fc);color:#073979;box-shadow:0 10px 30px #54c9f070}.feature-chip i{color:#b9ecff}.fine-badge{background:linear-gradient(110deg,#0f5fc8,#22b9e8)}.loader-ring{background:linear-gradient(140deg,#d9ecff,#d9f9ff)!important;color:#1465c5}.login-loader-icon{background:linear-gradient(140deg,#0f56c6,#20bfe9)!important}.auth-tab.bg-white{color:#165db5}.theme-toggle{display:inline-flex;height:2.5rem;width:2.5rem;align-items:center;justify-content:center;border-radius:.85rem;background:#e5f2ff;color:#135aa9;transition:.2s}.theme-toggle:hover{background:#c9e6ff;transform:translateY(-1px)}
-    .dark-mode body{background:radial-gradient(circle at 8% 7%,#0e3b6f 0,transparent 24rem),radial-gradient(circle at 91% 13%,#123d69 0,transparent 25rem),linear-gradient(135deg,#071426,#0a1d35 52%,#0d2845);color:#dcecff}.dark-mode #authView>div{border-color:#ffffff14;box-shadow:0 28px 70px #0000005c}.dark-mode #authView>div>section:last-child{background:#0d2038;color:#e7f3ff}.dark-mode .input{background:#102944;border-color:#22466d;color:#e9f5ff}.dark-mode .input:hover{border-color:#3d75aa}.dark-mode .input:focus{border-color:#38bdf8;box-shadow:0 0 0 4px #38bdf821;background:#112f4f}.dark-mode .label{color:#a8c5e6}.dark-mode .auth-tab{color:#a9c4e2}.dark-mode .auth-tab.bg-white{background:#173a62!important;color:#a9e5ff;box-shadow:none}.dark-mode .bg-slate-100{background:#102944!important}.dark-mode #appView nav{background:#091a2ee8!important;border-color:#1f466f!important}.dark-mode #appView .rounded-2xl.bg-white{background:#0e243de8!important;border-color:#1e466f;box-shadow:0 12px 32px #0000002b}.dark-mode #appView h1,.dark-mode #appView h2{color:#d8efff}.dark-mode .text-slate-500,.dark-mode .text-slate-600{color:#a6bfd8!important}.dark-mode .text-slate-800{color:#dcecff!important}.dark-mode .text-ink{color:#bde7ff!important}.dark-mode .secondary-btn,.dark-mode .logout-btn,.dark-mode .theme-toggle{background:#163b63;color:#bfe8ff}.dark-mode .secondary-btn:hover,.dark-mode .logout-btn:hover,.dark-mode .theme-toggle:hover{background:#1e517f}.dark-mode .status-btn{background:#102944;color:#c2d9ed}.dark-mode .table-wrap{background:#0b1d32;border-color:#20456b}.dark-mode .table-wrap th{background:#112d4b;color:#9ed9ff}.dark-mode .table-wrap th,.dark-mode .table-wrap td{border-color:#1c3c5f}.dark-mode .table-wrap tbody tr:hover{background:#102b48}.dark-mode .bg-indigo-50{background:#102b4d!important;border-color:#28547f!important}.dark-mode .text-indigo-500{color:#8fd8ff!important}.dark-mode .bg-amber-50{background:#352c16!important}.dark-mode .bg-emerald-50{background:#103b3a!important}.dark-mode .bg-red-50{background:#3d1825!important}.dark-mode .fine-row{background:#29203a!important}.dark-mode #laws{color:#acc6df!important}.dark-mode #appLoader>div{background:#102943;color:#e8f5ff}.dark-mode .login-loader{background:linear-gradient(135deg,#102944,#142f4b 55%,#0d3041)}
-    @media(max-width:640px){.theme-toggle{height:2.5rem;width:2.5rem}.logout-btn{min-height:2.5rem;min-width:2.5rem;justify-content:center;padding:.65rem}.nav-mark{height:2.3rem;width:2.3rem}.table-wrap table{min-width:36rem}.primary-btn,.secondary-btn{min-height:2.75rem}.table-wrap{max-height:20rem}#appView .rounded-2xl.bg-white{padding:1.15rem}.hero-time{padding:1.25rem}.auth-showcase h1{font-size:2.1rem}.auth-showcase{padding-top:4.8rem!important}}
-  </style>
-</body></html>
+  `;
+}
+
+$('markMissingBtn')?.addEventListener('click', async () => {
+  if (!window.confirm('Check and mark missing attendance for approved members who did not submit attendance before Saturday 11:00 PM? Points will be assigned on the monthly holiday rule basis.')) return;
+  try {
+    await withLoader('Checking missing attendance', 'Recording missing attendance on the rule basis', async () => {
+      const { data: count, error } = await supabase.rpc('choir_mark_missing_attendance');
+      if (error) throw error;
+      await loadAdmin();
+      await loadMember();
+      const num = Number(count) || 0;
+      toast(num > 0 ? `Marked missing attendance for ${num} member${num === 1 ? '' : 's'} on the rule basis.` : 'No missing attendance records were needed for today.');
+    });
+  } catch (error) { toast(friendlyError(error, 'We could not mark missing attendance. Please try again.'), 'error'); }
+});
+
+$('syncDataBtn')?.addEventListener('click', async () => {
+  try {
+    await withLoader('Refreshing data', 'Loading the latest choir information', loadAdmin);
+    toast('Data refreshed.');
+  } catch (error) { toast(friendlyError(error, 'We could not refresh the choir board. Please try again.'), 'error'); }
+});
+
+$('memberDetailBtn')?.addEventListener('click', async () => {
+  try { await showMemberDetail(); }
+  catch (error) { $('memberDetailResult').innerHTML = '<p class="text-sm text-red-600">We could not load this member’s detail.</p>'; toast(friendlyError(error, 'We could not load this member’s detail. Please try again.'), 'error'); }
+});
+
+$('memberDetailSelect')?.addEventListener('change', () => {
+  if ($('memberDetailSelect').value) {
+    showMemberDetail().catch(err => console.error(err));
+  }
+});
+
+$('saturdayDateSelect')?.addEventListener('change', async () => {
+  try {
+    await withLoader('Loading status', 'Updating Saturday attendance status', () => loadUnsubmittedSaturday($('saturdayDateSelect').value));
+  } catch (error) {
+    toast(friendlyError(error, 'Could not load attendance for that date.'), 'error');
+  }
+});
+
+$('refreshUnsubmittedBtn')?.addEventListener('click', async () => {
+  try {
+    await withLoader('Refreshing status', 'Checking latest Saturday attendance', () => loadUnsubmittedSaturday($('saturdayDateSelect')?.value));
+    toast('Saturday attendance status refreshed.');
+  } catch (error) {
+    toast(friendlyError(error, 'Could not refresh attendance status.'), 'error');
+  }
+});
+
+// Member detail form submission: add manual points
+$('memberDetailResult')?.addEventListener('submit', async event => {
+  if (event.target.id !== 'detailManualPointsForm') return;
+  event.preventDefault();
+  const form = event.target;
+  const memberId = form.dataset.memberId;
+  const pointsInput = $('detailPointsInput');
+  const submitBtn = $('detailAddPointsSubmit') || submitButton(form);
+  const points = Number(pointsInput?.value);
+  if (!memberId) return toast('No member selected.', 'error');
+  if (!Number.isInteger(points) || points < 1 || points > 100) return toast('Enter a whole number from 1 to 100.', 'error');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    await withLoader('Adding manual points', `Saving ${points} manual point${points === 1 ? '' : 's'}`, async () => {
+      const { data, error } = await supabase.rpc('choir_admin_add_manual_points', { p_user_id: memberId, p_points: points });
+      if (error) throw error;
+      if (Number(data) !== points) throw new Error('Not all manual points were saved. Please refresh and try again.');
+      await showMemberDetail(memberId);
+      await loadAdmin();
+      await loadMember();
+    });
+    toast(`${points} manual point${points === 1 ? '' : 's'} added.`);
+  } catch (error) {
+    toast(friendlyError(error, 'We could not add the points. Please try again.'), 'error');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+// Member detail row deletion: delete manual points or stack rows
+$('memberDetailResult')?.addEventListener('click', async event => {
+  const deleteBtn = event.target.closest('[data-delete-detail-record]');
+  if (!deleteBtn) return;
+  const recordId = deleteBtn.dataset.deleteDetailRecord;
+  const memberId = deleteBtn.dataset.memberId || $('memberDetailSelect').value;
+  if (!recordId || !window.confirm('Delete this attendance record? This cannot be undone.')) return;
+  deleteBtn.disabled = true;
+  try {
+    await withLoader('Deleting record', 'Removing the selected record', async () => {
+      const { error } = await supabase.rpc('choir_admin_delete_stack_row', { p_stack_id: recordId });
+      if (error) throw error;
+      await showMemberDetail(memberId);
+      await loadAdmin();
+      await loadMember();
+    });
+    toast('Record deleted.');
+  } catch (error) {
+    toast(friendlyError(error, 'We could not delete that record. Please try again.'), 'error');
+  } finally {
+    deleteBtn.disabled = false;
+  }
+});
+
+$('pendingRows').addEventListener('click', async event => { const approve = event.target.dataset.approve; const reject = event.target.dataset.reject; if (!approve && !reject) return; if (approve && event.target.dataset.hasSymbol !== 'true') return toast('This member needs a symbol number before you can approve them.', 'error'); const id = approve || reject; const update = approve ? { status: 'approved' } : { status: 'rejected' }; try { await withLoader(approve ? 'Approving member' : 'Rejecting member', 'Updating the member request', async () => { const { error } = await supabase.from('choir_profiles').update(update).eq('id', id); if (error) throw error; const { error: rebuildError } = await supabase.rpc('choir_rebuild_aggregate'); if (rebuildError) throw rebuildError; await loadAdmin(); }); toast(approve ? 'Member approved.' : 'Member rejected.'); } catch (error) { toast(friendlyError(error, 'We could not update this member. Please try again.'), 'error'); } });
+$('lawForm').addEventListener('submit', async event => { event.preventDefault(); const symbol = $('lawSymbol').value.trim(); try { await withLoader('Saving personal law', 'Updating member guidance', async () => { const { data: member, error } = await supabase.from('choir_profiles').select('id').eq('symbolnum', symbol).single(); if (error) throw new Error('No member was found for that symbol.'); const { error: saveError } = await supabase.from('choir_personal_laws').upsert({ user_id: member.id, personal_law: $('lawText').value.trim() }, { onConflict: 'user_id' }); if (saveError) throw saveError; }); event.target.reset(); toast('Personal law saved.'); } catch (error) { toast(friendlyError(error, 'We could not save the personal law. Please try again.'), 'error'); } });
+$('settingsForm').addEventListener('submit', async event => { event.preventDefault(); const month = $('settingMonth').value.trim(); const days = Number($('settingDays').value); try { await withLoader('Saving month settings', 'Keeping aggregate totals unchanged', async () => { const { error } = await supabase.rpc('choir_admin_set_settings', { p_month: month, p_working_days: days }); if (error) throw error; settings.month_name = month; settings.working_days = days; await loadMember(); await loadAdmin(); }); toast('Month settings saved; aggregate totals were kept.'); } catch (error) { toast(friendlyError(error, 'We could not save the month settings. Please try again.'), 'error'); } });
+$('csvExport').addEventListener('click', async () => { try { await withLoader('Preparing CSV', 'Collecting the active month attendance data', async () => { const { data, error } = await supabase.from('choir_attendance_stack').select('symbol,datefilled,month_name,name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status').eq('month_name', settings.month_name).order('datefilled'); if (error) throw error; const headers = ['Symbol','Datefilled','Month','Name','Reason','Time filled','Point','Holiday used','Attendance on time','Status']; const csv = [headers, ...data.map(Object.values)].map(row => row.map(v => `"${String(v ?? '').replaceAll('"','""')}"`).join(',')).join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); link.download = `${settings.month_name}-choir-attendance.csv`; link.click(); URL.revokeObjectURL(link.href); }); } catch (error) { toast(friendlyError(error, 'We could not prepare the download. Please try again.'), 'error'); } });
+$('logoutBtn').addEventListener('click', async () => { try { showLoader('Signing you out', 'Closing your secure session'); await supabase.auth.signOut({ scope: 'local' }); location.replace(location.pathname); } catch (error) { hideLoader(); toast(friendlyError(error, 'We could not sign you out. Please try again.'), 'error'); } });
+supabase.auth.getSession().then(async ({ data }) => {
+  if (data.session) await withLoader('Opening your portal', 'Loading your choir account', boot);
+}).catch(error => { hideLoader(); toast(friendlyError(error, 'We could not open your choir space. Please try again.'), 'error'); });
