@@ -209,6 +209,101 @@ $('signupForm').addEventListener('submit', async event => {
  $('loginForm').addEventListener('submit', async event => { event.preventDefault(); const button = submitButton(event.currentTarget); const email = $('loginEmail').value.trim(); const symbol = $('loginSymbol').value.trim(); button.disabled = true; loginProgress.classList.remove('hidden'); try { await withLoader('Signing you in', 'Opening your choir space', async () => { const { data, error } = await supabase.auth.signInWithPassword({ email, password: symbol }); if (error) throw error; rememberLogin(email, symbol); await boot(data.user); }); } catch (error) { toast(friendlyError(error, 'We could not log you in. Please try again.'), 'error'); } finally { loginProgress.classList.add('hidden'); button.disabled = false; } });
 
 function startClock() { const render = () => text('nepalClock', new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kathmandu', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format()); render(); setInterval(render, 1000); }
+
+let rulesSliderInitialized = false;
+function initRulesSlider() {
+  if (rulesSliderInitialized) return;
+  const track = $('rulesSliderTrack');
+  const prevBtn = $('sliderPrevBtn');
+  const nextBtn = $('sliderNextBtn');
+  const counter = $('sliderCounter');
+  const dotsContainer = $('sliderDots');
+  if (!track || !prevBtn || !nextBtn || !dotsContainer) return;
+  rulesSliderInitialized = true;
+
+  const slides = track.children;
+  const totalSlides = slides.length;
+  let currentSlide = 0;
+  let autoTimer = null;
+
+  dotsContainer.innerHTML = Array.from({ length: totalSlides }).map((_, i) =>
+    `<button type="button" data-slide-index="${i}" aria-label="Go to rule ${i + 1}" class="h-2 rounded-full transition-all duration-300 ${i === 0 ? 'w-6 bg-blue-600' : 'w-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300'}"></button>`
+  ).join('');
+
+  function updateSlider() {
+    track.style.transform = `translateX(-${currentSlide * 100}%)`;
+    if (counter) counter.textContent = `${currentSlide + 1} / ${totalSlides}`;
+    const dots = dotsContainer.querySelectorAll('button');
+    dots.forEach((dot, i) => {
+      if (i === currentSlide) {
+        dot.className = 'h-2 w-6 rounded-full bg-blue-600 transition-all duration-300';
+      } else {
+        dot.className = 'h-2 w-2 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 transition-all duration-300';
+      }
+    });
+  }
+
+  function nextSlide() {
+    currentSlide = (currentSlide + 1) % totalSlides;
+    updateSlider();
+  }
+
+  function prevSlide() {
+    currentSlide = (currentSlide - 1 + totalSlides) % totalSlides;
+    updateSlider();
+  }
+
+  function startAutoSlide() {
+    stopAutoSlide();
+    autoTimer = setInterval(nextSlide, 7000);
+  }
+
+  function stopAutoSlide() {
+    if (autoTimer) {
+      clearInterval(autoTimer);
+      autoTimer = null;
+    }
+  }
+
+  nextBtn.addEventListener('click', () => {
+    nextSlide();
+    startAutoSlide();
+  });
+
+  prevBtn.addEventListener('click', () => {
+    prevSlide();
+    startAutoSlide();
+  });
+
+  dotsContainer.addEventListener('click', e => {
+    const btn = e.target.closest('[data-slide-index]');
+    if (!btn) return;
+    currentSlide = Number(btn.dataset.slideIndex);
+    updateSlider();
+    startAutoSlide();
+  });
+
+  const section = $('rulesSliderSection');
+  if (section) {
+    section.addEventListener('mouseenter', stopAutoSlide);
+    section.addEventListener('mouseleave', startAutoSlide);
+    let touchStartX = 0;
+    section.addEventListener('touchstart', e => {
+      touchStartX = e.changedTouches[0].screenX;
+      stopAutoSlide();
+    }, { passive: true });
+    section.addEventListener('touchend', e => {
+      const touchEndX = e.changedTouches[0].screenX;
+      if (touchStartX - touchEndX > 50) nextSlide();
+      else if (touchEndX - touchStartX > 50) prevSlide();
+      startAutoSlide();
+    }, { passive: true });
+  }
+
+  updateSlider();
+  startAutoSlide();
+}
+
 async function signedSelfie() {
   const storedPath = profile?.selfie_path?.trim();
   if (!user) return;
@@ -238,7 +333,7 @@ async function boot(activeUser) {
   const [{ data: nextProfile, error: profileError }, { data: nextSettings, error: settingsError }] = await Promise.all([
     supabase.from('choir_profiles').select('id,full_name,email,symbolnum,selfie_path,status,role').eq('id', user.id).single(), supabase.from('choir_settings').select('month_name,working_days').eq('id', 1).single()
   ]); if (profileError || settingsError) return toast(friendlyError(profileError || settingsError, 'We could not open your choir space. Please try again.'), 'error'); profile = nextProfile; settings = nextSettings;
-  $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); text('navEmail', profile.email); text('navName', profile.full_name); text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`); startClock();
+  $('authView').classList.add('hidden'); $('appView').classList.remove('hidden'); text('navEmail', profile.email); text('navName', profile.full_name); text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`); startClock(); initRulesSlider();
   if (profile.status !== 'approved') $('pendingPanel').classList.remove('hidden');
   // The portal is ready now. Load non-essential data without holding up sign-in.
   void signedSelfie();
@@ -253,15 +348,24 @@ async function loadMember() {
     supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).maybeSingle(),
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
     supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').maybeSingle(),
-    supabase.from('choir_attendance_stack').select('user_id,point,datefilled').lte('datefilled', today)
+    supabase.from('choir_attendance_stack').select('user_id,point,datefilled,attendance_on_time,attendance_status').lte('datefilled', today).order('datefilled', { ascending: false })
   ]);
   if (lawResult.error || aggregateResult.error || attendanceResult.error) {
     throw lawResult.error || aggregateResult.error || attendanceResult.error;
   }
   if (lawResult.data) { $('personalLawCard').classList.remove('hidden'); text('personalLaw', lawResult.data.personal_law); }
   const stackPointsByUser = {};
+  const streakByUser = {};
+  const streakBrokenByUser = new Set();
   (stackPointsResult?.data || []).forEach(row => {
     stackPointsByUser[row.user_id] = (stackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
+    if (row.attendance_status === 'manual') return;
+    if (streakBrokenByUser.has(row.user_id)) return;
+    if (Number(row.attendance_on_time) === 1) {
+      streakByUser[row.user_id] = (streakByUser[row.user_id] || 0) + 1;
+    } else {
+      streakBrokenByUser.add(row.user_id);
+    }
   });
   const workingDays = Number(settings?.working_days) || 4;
   const aggregates = (aggregateResult.data || []).map(row => {
@@ -282,8 +386,17 @@ async function loadMember() {
     agg.total_points = stackPointsByUser[user.id] - myBonus;
   }
   const bonusNote = Number(agg.total_attendance_on_time) >= workingDays ? ' (on-time bonus: -1 point applied)' : '';
-  $('memberStats').innerHTML = aggregates.map(row => { const isFine = Number(row.total_points) >= 10; return `<tr class="${isFine ? 'fine-row' : ''}"><td class="p-3 font-semibold">${escape(row.name)}</td><td class="p-3 font-bold">${row.total_points}</td><td class="p-3">${row.total_holiday_used}</td><td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`; }).join('') || '<tr><td colspan="4">No member statistics yet.</td></tr>';
-  text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}${bonusNote}`);
+  const myStreak = streakByUser[user.id] || 0;
+  const streakNote = myStreak > 0 ? ` • active on-time streak: 🔥 ${myStreak}` : '';
+  $('memberStats').innerHTML = aggregates.map(row => {
+    const isFine = Number(row.total_points) >= 10;
+    const streak = streakByUser[row.user_id] || 0;
+    const streakBadge = streak > 0
+      ? `<span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-black text-amber-600 border border-amber-200/80 shadow-xs dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/40"><span class="text-sm">🔥</span> ${streak}</span>`
+      : '<span class="text-slate-300 dark:text-slate-600 font-medium">—</span>';
+    return `<tr class="${isFine ? 'fine-row' : ''}"><td class="p-3 font-semibold">${escape(row.name)}</td><td class="p-3 font-bold">${row.total_points}</td><td class="p-3">${row.total_holiday_used}</td><td class="p-3">${streakBadge}</td><td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '—'}</td></tr>`;
+  }).join('') || '<tr><td colspan="5">No member statistics yet.</td></tr>';
+  text('statsCaption', `All-time aggregate (total points till date) • ${settings.month_name}: ${settings.working_days} working Saturdays • on-time attendance: ${agg.total_attendance_on_time}${bonusNote}${streakNote}`);
   const npt = nptNow(); const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
   const alreadySubmitted = Boolean(attendanceResult.data);
   text('attendanceState', alreadySubmitted ? 'Already filled in' : inWindow && profile.status === 'approved' ? 'Form is open' : profile.status === 'approved' ? 'Form is closed' : 'Approval required');
