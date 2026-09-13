@@ -617,62 +617,24 @@ async function loadMember() {
   }
 
   const stackPointsByUser = {};
-  const userAttendanceRecords = {};
+  const userPresentCount = {};
   (stackPointsResult?.data || []).forEach(row => {
     stackPointsByUser[row.user_id] = (stackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
-    if (row.attendance_status !== 'manual') {
-      if (!userAttendanceRecords[row.user_id]) userAttendanceRecords[row.user_id] = [];
-      userAttendanceRecords[row.user_id].push(row);
+    if (row.attendance_status === 'present') {
+      userPresentCount[row.user_id] = (userPresentCount[row.user_id] || 0) + 1;
     }
   });
 
-  const activeSatStr = getActiveSaturdayDate();
-  const activeSatDate = new Date(activeSatStr + 'T12:00:00Z');
   const streakByUser = {};
-
-  // Streaks from database security-definer RPC
   (streakRpcResult?.data || []).forEach(item => {
     if (item.user_id && item.streak !== undefined) {
       streakByUser[item.user_id] = Number(item.streak) || 0;
     }
   });
 
-  // Client-side fallback continuous calculation
-  Object.entries(userAttendanceRecords).forEach(([userId, records]) => {
-    records.sort((a, b) => b.datefilled.localeCompare(a.datefilled));
-    if (records.length === 0) return;
-
-    const mostRecent = records[0];
-    const mostRecentDate = new Date(mostRecent.datefilled + 'T12:00:00Z');
-    const daysSinceActive = Math.round((activeSatDate - mostRecentDate) / (1000 * 60 * 60 * 24));
-
-    if (Number(mostRecent.attendance_on_time) !== 1 || daysSinceActive > 7) {
-      streakByUser[userId] = 0;
-      return;
-    }
-
-    let streak = 0;
-    let prevDate = null;
-    for (const row of records) {
-      if (Number(row.attendance_on_time) !== 1) break;
-      const rowDate = new Date(row.datefilled + 'T12:00:00Z');
-      if (prevDate !== null) {
-        const diffDays = Math.round((prevDate - rowDate) / (1000 * 60 * 60 * 24));
-        if (diffDays > 7) break;
-      }
-      streak++;
-      prevDate = rowDate;
-    }
-    streakByUser[userId] = streak;
-  });
-
-  const workingDays = Number(settings?.working_days) || 4;
   const aggregates = (aggregateResult.data || []).map(row => {
     const rawStackPoints = stackPointsByUser[row.user_id];
-    const onTime = Number(row.total_attendance_on_time) || 0;
-    const onTimeBonus = onTime >= workingDays ? 1 : 0;
-    const basePoints = rawStackPoints !== undefined ? rawStackPoints : (Number(row.total_points) || 0);
-    const totalPoints = rawStackPoints !== undefined ? (basePoints - onTimeBonus) : basePoints;
+    const totalPoints = rawStackPoints !== undefined ? rawStackPoints : (Number(row.total_points) || 0);
     return {
       ...row,
       total_points: totalPoints
@@ -681,42 +643,34 @@ async function loadMember() {
 
   const agg = aggregates.find(row => row.user_id === user.id) || { total_points: 0, total_holiday_used: 0, total_attendance_on_time: 0 };
   if (stackPointsByUser[user.id] !== undefined) {
-    const myOnTime = Number(agg.total_attendance_on_time) || 0;
-    const myBonus = myOnTime >= workingDays ? 1 : 0;
-    agg.total_points = stackPointsByUser[user.id] - myBonus;
+    agg.total_points = stackPointsByUser[user.id];
   }
 
-  const bonusNote = Number(agg.total_attendance_on_time) >= workingDays ? ' (on-time bonus: -1 point applied)' : '';
-  const myStreak = (agg.on_time_streak !== undefined && agg.on_time_streak !== null && Number(agg.on_time_streak) > 0)
-    ? Number(agg.on_time_streak)
-    : (streakByUser[user.id] || 0);
-  const streakNote = myStreak > 0 ? ` • active on-time streak: 🔥 ${myStreak}` : '';
+  const myStreak = userPresentCount[user.id] ?? (agg.on_time_streak !== undefined && agg.on_time_streak !== null ? Number(agg.on_time_streak) : (streakByUser[user.id] || 0));
+  const streakNote = ` • total present Saturdays: ${myStreak}`;
 
-  // Render Member Statistics (5 Columns)
+  // Render Member Statistics (6 Columns)
   $('memberStats').innerHTML = aggregates.map(row => {
     const isFine = Number(row.total_points) >= 10;
-    const streak = (row.on_time_streak !== undefined && row.on_time_streak !== null && Number(row.on_time_streak) > 0)
+    const streak = userPresentCount[row.user_id] ?? ((row.on_time_streak !== undefined && row.on_time_streak !== null)
       ? Number(row.on_time_streak)
-      : (streakByUser[row.user_id] || 0);
+      : (streakByUser[row.user_id] || 0));
     const onTimeCount = Number(row.total_attendance_on_time) || 0;
-    const streakBadge = streak > 0
-      ? `<span class="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2.5 py-0.5 text-xs font-black text-white shadow-sm" title="Active on-time streak: ${streak} continuous Saturdays">🔥 ${streak}</span>`
-      : '';
     return `<tr class="${isFine ? 'fine-row' : 'hover:bg-slate-50 transition-colors'}">
       <td class="p-3.5 font-bold text-black">${escape(row.name)}</td>
       <td class="p-3.5 font-extrabold text-black">${row.total_points}</td>
       <td class="p-3.5 font-semibold text-black">${row.total_holiday_used}</td>
+      <td class="p-3.5 font-extrabold text-black">${onTimeCount}</td>
       <td class="p-3.5">
-        <div class="inline-flex items-center gap-2 font-bold text-black" title="Month on-time: ${onTimeCount}${streak > 0 ? ` • Active streak: 🔥 ${streak}` : ''}">
-          <span class="font-extrabold">${onTimeCount}</span>
-          ${streakBadge}
-        </div>
+        <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-black text-black border border-slate-200" title="Total present Saturdays till date: ${streak}">
+          ${streak}
+        </span>
       </td>
       <td class="p-3.5">${isFine ? '<span class="fine-badge">Fine</span>' : '<span class="text-black font-bold">—</span>'}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="5" class="py-6 text-center font-bold text-black">No member statistics yet.</td></tr>';
+  }).join('') || '<tr><td colspan="6" class="py-6 text-center font-bold text-black">No member statistics yet.</td></tr>';
 
-  text('statsCaption', `All-time aggregate totals • ${settings.month_name}: ${settings.working_days} working Saturdays • your on-time: ${agg.total_attendance_on_time}${bonusNote}${streakNote}`);
+  text('statsCaption', `All-time aggregate totals • ${settings.month_name}: ${settings.working_days} working Saturdays • your on-time: ${agg.total_attendance_on_time}${streakNote}`);
 
   const npt = nptNow();
   const inWindow = npt.getDay() === 6 && (npt.getHours() > 3 || (npt.getHours() === 3 && npt.getMinutes() >= 0)) && npt.getHours() < 23;
@@ -835,7 +789,7 @@ async function loadUnsubmittedSaturday(targetDate) {
   const rowsEl = $('unsubmittedRows');
   if (rowsEl) {
     if (unsubmitted.length === 0) {
-      rowsEl.innerHTML = '<tr><td colspan="5" class="py-6 text-center font-bold text-black">All approved choir members have filled attendance for this Saturday! 🎉</td></tr>';
+      rowsEl.innerHTML = '<tr><td colspan="6" class="py-6 text-center font-bold text-black">All approved choir members have filled attendance for this Saturday! 🎉</td></tr>';
     } else {
       rowsEl.innerHTML = unsubmitted.map(m => {
         const isAutoMarked = autoMarkedUserIds.has(m.id);
@@ -848,9 +802,267 @@ async function loadUnsubmittedSaturday(targetDate) {
           <td class="p-3 font-medium text-black">${escape(m.email || '—')}</td>
           <td class="p-3 font-medium text-black">${escape(m.phone_num || '—')}</td>
           <td class="p-3">${statusBadge}</td>
+          <td class="p-3 whitespace-nowrap">
+            ${isAutoMarked ? '<span class="text-xs font-bold text-black/60">Assigned</span>' : `<button type="button" data-assign-missing="${m.id}" data-member-name="${escape(m.full_name)}" class="rounded-xl bg-amber-600 px-3 py-1 text-xs font-bold text-white shadow-sm hover:bg-amber-700 transition">Assign</button>`}
+          </td>
         </tr>`;
       }).join('');
     }
+  }
+}
+
+// Extra Table Part 1: Monthly Perfect On-Time Review (Bonus -1 Action Table)
+async function loadBonusReview(targetMonth) {
+  const month = targetMonth || $('bonusMonthSelect')?.value || settings?.month_name || 'Baisakh';
+  if ($('bonusMonthSelect') && $('bonusMonthSelect').value !== month) {
+    $('bonusMonthSelect').value = month;
+  }
+  const rowsEl = $('bonusReviewRows');
+  const countEl = $('bonusQualCount');
+  if (!rowsEl) return;
+
+  rowsEl.innerHTML = '<tr><td colspan="6" class="py-6 text-center font-bold text-black">Loading qualifying members...</td></tr>';
+
+  // Get working days for this month
+  const { data: monthData } = await supabase.from('choir_months').select('working_days').eq('month_name', month).maybeSingle();
+  const workingDays = monthData?.working_days || settings?.working_days || 4;
+
+  const [membersRes, stackRes, reviewsRes] = await Promise.all([
+    supabase.from('choir_profiles').select('id,full_name,symbolnum').eq('status', 'approved').order('full_name'),
+    supabase.from('choir_attendance_stack').select('user_id,attendance_on_time,point').eq('month_name', month),
+    supabase.from('choir_bonus_reviews').select('user_id,status').eq('month_name', month)
+  ]);
+
+  const onTimeByUser = {};
+  (stackRes?.data || []).forEach(r => {
+    if (Number(r.attendance_on_time) === 1) {
+      onTimeByUser[r.user_id] = (onTimeByUser[r.user_id] || 0) + 1;
+    }
+  });
+
+  const reviewStatusByUser = {};
+  (reviewsRes?.data || []).forEach(r => {
+    reviewStatusByUser[r.user_id] = r.status;
+  });
+
+  // Qualifying members: onTime >= workingDays
+  const qualifying = (membersRes?.data || []).filter(m => (onTimeByUser[m.id] || 0) >= workingDays);
+
+  if (countEl) {
+    countEl.textContent = `${qualifying.length} qualifying`;
+    countEl.className = qualifying.length > 0
+      ? 'rounded-full bg-blue-100 px-3 py-0.5 text-xs font-black text-blue-900 border border-blue-200'
+      : 'rounded-full bg-slate-100 px-3 py-0.5 text-xs font-black text-slate-700 border border-slate-200';
+  }
+
+  if (qualifying.length === 0) {
+    rowsEl.innerHTML = `<tr><td colspan="6" class="py-6 text-center font-bold text-black">No members reached ${workingDays} on-time attendances for ${escape(month)}.</td></tr>`;
+    return;
+  }
+
+  rowsEl.innerHTML = qualifying.map(m => {
+    const onTime = onTimeByUser[m.id] || 0;
+    const reviewStatus = reviewStatusByUser[m.id] || 'eligible';
+
+    let statusBadge = '<span class="rounded-full bg-blue-100 border border-blue-200 px-2.5 py-0.5 text-xs font-black text-blue-800">Pending Review</span>';
+    if (reviewStatus === 'validated') {
+      statusBadge = '<span class="rounded-full bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 text-xs font-black text-emerald-800">Validated (-1 applied)</span>';
+    } else if (reviewStatus === 'excluded') {
+      statusBadge = '<span class="rounded-full bg-rose-100 border border-rose-200 px-2.5 py-0.5 text-xs font-black text-rose-800">Excluded</span>';
+    }
+
+    const isValidated = reviewStatus === 'validated';
+    const isExcluded = reviewStatus === 'excluded';
+
+    return `<tr class="hover:bg-slate-50 transition-colors">
+      <td class="p-3 font-bold text-black">${escape(m.full_name)}</td>
+      <td class="p-3 font-extrabold text-black">${escape(m.symbolnum || '—')}</td>
+      <td class="p-3 font-semibold text-black">${escape(month)}</td>
+      <td class="p-3 font-extrabold text-black">${onTime} / ${workingDays}</td>
+      <td class="p-3">${statusBadge}</td>
+      <td class="p-3 whitespace-nowrap space-x-1.5">
+        <button type="button" data-award-bonus="${m.id}" data-month="${escape(month)}" ${isValidated ? 'disabled' : ''} class="rounded-xl ${isValidated ? 'bg-emerald-200 text-emerald-800 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 text-white'} px-3 py-1 text-xs font-bold shadow-sm transition">
+          ${isValidated ? '✓ Validated' : 'Valid (-1)'}
+        </button>
+        <button type="button" data-exclude-bonus="${m.id}" data-month="${escape(month)}" ${isExcluded ? 'disabled' : ''} class="rounded-xl ${isExcluded ? 'bg-slate-200 text-slate-600 cursor-not-allowed' : 'bg-red-50 border border-red-200 hover:bg-red-100 text-red-700'} px-3 py-1 text-xs font-bold transition">
+          ${isExcluded ? 'Excluded' : 'Exclude'}
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// Admin Statistics Table with Month Filter
+async function renderAdminStats(filterMonth = 'all') {
+  const tableHead = $('adminStatsHead');
+  const rowsEl = $('adminStatsRows');
+  const captionEl = $('adminStatsCaption');
+  if (!rowsEl) return;
+
+  const [membersRes, stackRes, aggregateRes] = await Promise.all([
+    supabase.from('choir_profiles').select('id,full_name,symbolnum,email,phone_num').eq('status', 'approved').order('full_name'),
+    supabase.from('choir_attendance_stack').select('user_id,point,holiday_used,attendance_on_time,attendance_status,month_name'),
+    supabase.from('choir_attendance_aggregate').select('user_id,total_points,total_holiday_used,total_attendance_on_time,on_time_streak')
+  ]);
+
+  const approvedMembers = membersRes.data || [];
+  const stackRows = stackRes.data || [];
+  const aggregateRows = aggregateRes.data || [];
+
+  const aggMap = new Map(aggregateRows.map(r => [r.user_id, r]));
+
+  if (filterMonth === 'all') {
+    if (captionEl) captionEl.textContent = 'All-time cumulative statistics across all months.';
+    if (tableHead) {
+      tableHead.innerHTML = `<tr>
+        <th class="p-3.5">Name</th>
+        <th class="p-3.5">Total points</th>
+        <th class="p-3.5">Holiday used (${escape(settings.month_name)})</th>
+        <th class="p-3.5">Ontime (${escape(settings.month_name)})</th>
+        <th class="p-3.5">Streak (Present)</th>
+        <th class="p-3.5">Status</th>
+      </tr>`;
+    }
+
+    const allPointsByUser = {};
+    const allPresentByUser = {};
+    stackRows.forEach(r => {
+      allPointsByUser[r.user_id] = (allPointsByUser[r.user_id] || 0) + (Number(r.point) || 0);
+      if (r.attendance_status === 'present') {
+        allPresentByUser[r.user_id] = (allPresentByUser[r.user_id] || 0) + 1;
+      }
+    });
+
+    rowsEl.innerHTML = approvedMembers.map(m => {
+      const agg = aggMap.get(m.id);
+      const points = allPointsByUser[m.id] !== undefined ? allPointsByUser[m.id] : (Number(agg?.total_points) || 0);
+      const holidays = Number(agg?.total_holiday_used) || 0;
+      const onTime = Number(agg?.total_attendance_on_time) || 0;
+      const streak = allPresentByUser[m.id] !== undefined ? allPresentByUser[m.id] : (Number(agg?.on_time_streak) || 0);
+      const isFine = points >= 10;
+      return `<tr class="${isFine ? 'fine-row' : 'hover:bg-slate-50 transition-colors'}">
+        <td class="p-3 font-bold text-black">${escape(m.full_name)}</td>
+        <td class="p-3 font-extrabold text-black">${points}</td>
+        <td class="p-3 font-semibold text-black">${holidays}</td>
+        <td class="p-3 font-extrabold text-black">${onTime}</td>
+        <td class="p-3">
+          <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-black text-black border border-slate-200" title="Total present Saturdays till date: ${streak}">
+            ${streak}
+          </span>
+        </td>
+        <td class="p-3">${isFine ? '<span class="fine-badge">Fine</span>' : '<span class="text-black font-bold">—</span>'}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="p-4 text-center font-bold text-black">No member statistics.</td></tr>';
+
+  } else {
+    // Specific month view
+    if (captionEl) captionEl.textContent = `Statistics specifically for month: ${filterMonth}.`;
+    if (tableHead) {
+      tableHead.innerHTML = `<tr>
+        <th class="p-3.5">Name</th>
+        <th class="p-3.5">Points in ${escape(filterMonth)}</th>
+        <th class="p-3.5">Holidays in ${escape(filterMonth)}</th>
+        <th class="p-3.5">Ontime in ${escape(filterMonth)}</th>
+        <th class="p-3.5">Present in ${escape(filterMonth)}</th>
+        <th class="p-3.5">Month Status</th>
+      </tr>`;
+    }
+
+    const monthRows = stackRows.filter(r => r.month_name === filterMonth);
+    const monthPoints = {};
+    const monthHolidays = {};
+    const monthOntime = {};
+    const monthPresent = {};
+
+    monthRows.forEach(r => {
+      monthPoints[r.user_id] = (monthPoints[r.user_id] || 0) + (Number(r.point) || 0);
+      monthHolidays[r.user_id] = (monthHolidays[r.user_id] || 0) + (Number(r.holiday_used) || 0);
+      monthOntime[r.user_id] = (monthOntime[r.user_id] || 0) + (Number(r.attendance_on_time) || 0);
+      if (r.attendance_status === 'present') {
+        monthPresent[r.user_id] = (monthPresent[r.user_id] || 0) + 1;
+      }
+    });
+
+    const { data: monthConfig } = await supabase.from('choir_months').select('working_days').eq('month_name', filterMonth).maybeSingle();
+    const workingDays = monthConfig?.working_days || 4;
+
+    rowsEl.innerHTML = approvedMembers.map(m => {
+      const pts = monthPoints[m.id] || 0;
+      const hols = monthHolidays[m.id] || 0;
+      const onTime = monthOntime[m.id] || 0;
+      const present = monthPresent[m.id] || 0;
+      const isPerfect = onTime >= workingDays;
+      const statusBadge = isPerfect
+        ? '<span class="inline-flex items-center rounded-full bg-emerald-100 border border-emerald-200 px-2 py-0.5 text-xs font-black text-emerald-800">Perfect On-Time</span>'
+        : pts > 0
+          ? `<span class="inline-flex items-center rounded-full bg-rose-100 border border-rose-200 px-2 py-0.5 text-xs font-black text-rose-800">+${pts} pts</span>`
+          : '<span class="text-black font-bold">—</span>';
+
+      return `<tr class="hover:bg-slate-50 transition-colors">
+        <td class="p-3 font-bold text-black">${escape(m.full_name)}</td>
+        <td class="p-3 font-extrabold text-black">${pts}</td>
+        <td class="p-3 font-semibold text-black">${hols}</td>
+        <td class="p-3 font-extrabold text-black">${onTime} / ${workingDays}</td>
+        <td class="p-3 font-extrabold text-black">${present}</td>
+        <td class="p-3">${statusBadge}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="p-4 text-center font-bold text-black">No attendance records for this month.</td></tr>';
+  }
+}
+
+// Multi-Month List Loader
+async function loadMonthsList() {
+  const { data: months, error } = await supabase.from('choir_months').select('*').order('created_at');
+  if (error) {
+    console.error('Error loading choir_months:', error);
+    return;
+  }
+  const monthList = months || [];
+
+  const bonusSelect = $('bonusMonthSelect');
+  if (bonusSelect) {
+    const curVal = bonusSelect.value;
+    bonusSelect.innerHTML = monthList.map(m =>
+      `<option value="${escape(m.month_name)}"${m.is_active ? ' selected' : ''}>${escape(m.month_name)}${m.is_active ? ' (Active)' : ''}</option>`
+    ).join('');
+    if (curVal && monthList.some(m => m.month_name === curVal)) bonusSelect.value = curVal;
+  }
+
+  const statsFilter = $('adminStatsMonthFilter');
+  if (statsFilter) {
+    const curVal = statsFilter.value;
+    statsFilter.innerHTML = '<option value="all">All-Time Cumulative</option>' + monthList.map(m =>
+      `<option value="${escape(m.month_name)}">${escape(m.month_name)}${m.is_active ? ' (Active)' : ''}</option>`
+    ).join('');
+    if (curVal && (curVal === 'all' || monthList.some(m => m.month_name === curVal))) statsFilter.value = curVal;
+  }
+
+  const csvSelect = $('csvMonthSelect');
+  if (csvSelect) {
+    const curVal = csvSelect.value;
+    csvSelect.innerHTML = monthList.map(m =>
+      `<option value="${escape(m.month_name)}"${m.is_active ? ' selected' : ''}>${escape(m.month_name)}</option>`
+    ).join('');
+    if (curVal && monthList.some(m => m.month_name === curVal)) csvSelect.value = curVal;
+  }
+
+  const listRows = $('monthsListRows');
+  if (listRows) {
+    listRows.innerHTML = monthList.map(m => {
+      const activeBadge = m.is_active
+        ? '<span class="inline-flex items-center rounded-full bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 text-xs font-black text-emerald-800">Active</span>'
+        : '<span class="text-black font-semibold text-xs">—</span>';
+      return `<tr class="hover:bg-slate-50 transition-colors">
+        <td class="p-2.5 font-bold text-black">${escape(m.month_name)}</td>
+        <td class="p-2.5 font-extrabold text-black">${m.working_days} Saturdays</td>
+        <td class="p-2.5">${activeBadge}</td>
+        <td class="p-2.5 whitespace-nowrap space-x-1">
+          ${!m.is_active ? `<button type="button" data-set-active-month="${escape(m.month_name)}" class="rounded-lg bg-blue-600 px-2 py-1 text-xs font-bold text-white shadow-sm hover:bg-blue-700">Set Active</button>` : ''}
+          <button type="button" data-edit-month-days="${escape(m.month_name)}" data-days="${m.working_days}" class="rounded-lg bg-slate-100 border border-slate-300 px-2 py-1 text-xs font-bold text-black hover:bg-slate-200">Edit</button>
+          ${!m.is_active ? `<button type="button" data-delete-month="${escape(m.month_name)}" class="rounded-lg bg-red-50 border border-red-200 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100">Delete</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="4" class="p-4 text-center font-bold text-black">No months configured.</td></tr>';
   }
 }
 
@@ -882,20 +1094,19 @@ async function loadAdmin() {
     adminStackPointsByUser[row.user_id] = (adminStackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
   });
 
-  const workingDays = Number(settings?.working_days) || 4;
   const adminAggregates = (aggregates.data || []).map(r => {
     const rawStackPoints = adminStackPointsByUser[r.user_id];
-    const onTime = Number(r.total_attendance_on_time) || 0;
-    const onTimeBonus = onTime >= workingDays ? 1 : 0;
-    const basePoints = rawStackPoints !== undefined ? rawStackPoints : (Number(r.total_points) || 0);
-    const totalPoints = rawStackPoints !== undefined ? (basePoints - onTimeBonus) : basePoints;
+    const totalPoints = rawStackPoints !== undefined ? rawStackPoints : (Number(r.total_points) || 0);
     return {
       ...r,
       total_points: totalPoints
     };
   });
 
+  await loadMonthsList();
+  await loadBonusReview($('bonusMonthSelect')?.value);
   await loadUnsubmittedSaturday($('saturdayDateSelect')?.value);
+  await renderAdminStats($('adminStatsMonthFilter')?.value || 'all');
 
   const detailSelect = $('memberDetailSelect');
   const previouslySelected = detailSelect?.value;
@@ -921,9 +1132,6 @@ async function loadAdmin() {
       </td>
     </tr>`).join('') || '<tr><td colspan="5" class="p-4 text-center font-bold text-black">No pending member requests.</td></tr>';
   }
-
-  if ($('settingMonth')) $('settingMonth').value = settings.month_name;
-  if ($('settingDays')) $('settingDays').value = settings.working_days;
 }
 
 function attendanceLabel(row) {
@@ -1218,40 +1426,229 @@ $('lawForm')?.addEventListener('submit', async event => {
   }
 });
 
-// Working Month Settings Submission
-$('settingsForm')?.addEventListener('submit', async event => {
-  event.preventDefault();
-  const month = $('settingMonth').value.trim();
-  const days = Number($('settingDays').value);
-  try {
-    await withLoader('Saving month settings', 'Preserving aggregate totals', async () => {
-      const { error } = await supabase.rpc('choir_admin_set_settings', { p_month: month, p_working_days: days });
-      if (error) throw error;
-      settings.month_name = month;
-      settings.working_days = days;
-      await loadMember();
-      await loadAdmin();
-    });
-    toast('Month settings saved; aggregate totals preserved.');
-  } catch (error) {
-    toast(friendlyError(error, 'Could not save month settings. Please try again.'), 'error');
+// Extra Table Part 1: Bonus Review Actions (Valid & Exclude buttons)
+$('bonusReviewRows')?.addEventListener('click', async event => {
+  const awardBtn = event.target.closest('[data-award-bonus]');
+  const excludeBtn = event.target.closest('[data-exclude-bonus]');
+  if (!awardBtn && !excludeBtn) return;
+
+  if (awardBtn) {
+    const userId = awardBtn.dataset.awardBonus;
+    const month = awardBtn.dataset.month;
+    if (!userId || !month) return;
+    awardBtn.disabled = true;
+    try {
+      await withLoader('Awarding Bonus', `Applying -1 on-time bonus for ${month}`, async () => {
+        const { error } = await supabase.rpc('choir_admin_award_bonus', { p_user_id: userId, p_month: month });
+        if (error) throw error;
+        await loadBonusReview(month);
+        await loadAdmin();
+        await loadMember();
+      });
+      toast(`-1 on-time bonus applied for ${month}.`);
+    } catch (err) {
+      toast(friendlyError(err, 'Could not award bonus. Please try again.'), 'error');
+    } finally {
+      awardBtn.disabled = false;
+    }
+  } else if (excludeBtn) {
+    const userId = excludeBtn.dataset.excludeBonus;
+    const month = excludeBtn.dataset.month;
+    if (!userId || !month) return;
+    if (!window.confirm(`Exclude this member from the on-time bonus for ${month}?`)) return;
+    excludeBtn.disabled = true;
+    try {
+      await withLoader('Excluding Member', `Excluding member from ${month} bonus`, async () => {
+        const { error } = await supabase.rpc('choir_admin_exclude_bonus', { p_user_id: userId, p_month: month });
+        if (error) throw error;
+        await loadBonusReview(month);
+        await loadAdmin();
+        await loadMember();
+      });
+      toast(`Member excluded from ${month} bonus.`);
+    } catch (err) {
+      toast(friendlyError(err, 'Could not exclude member. Please try again.'), 'error');
+    } finally {
+      excludeBtn.disabled = false;
+    }
   }
 });
 
-// CSV Export
-$('csvExport')?.addEventListener('click', async () => {
+$('bonusMonthSelect')?.addEventListener('change', () => {
+  loadBonusReview($('bonusMonthSelect').value);
+});
+
+$('refreshBonusBtn')?.addEventListener('click', () => {
+  loadBonusReview($('bonusMonthSelect')?.value);
+  toast('Bonus review table refreshed.');
+});
+
+// Extra Table Part 2: Saturday Unsubmitted Attendance Assign Buttons
+$('unsubmittedRows')?.addEventListener('click', async event => {
+  const btn = event.target.closest('[data-assign-missing]');
+  if (!btn) return;
+  const userId = btn.dataset.assignMissing;
+  const name = btn.dataset.memberName || 'this member';
+  const satDate = $('saturdayDateSelect')?.value || getActiveSaturdayDate();
+  if (!userId || !satDate) return;
+  if (!window.confirm(`Assign missing attendance for ${name} on ${satDate} on the monthly holiday rule basis?`)) return;
+  btn.disabled = true;
   try {
-    await withLoader('Preparing CSV', 'Collecting active month attendance data', async () => {
+    await withLoader('Assigning Attendance', 'Recording missing attendance on rule basis', async () => {
+      const { error } = await supabase.rpc('choir_mark_missing_attendance', { p_date: satDate, p_user_id: userId });
+      if (error) throw error;
+      await loadUnsubmittedSaturday(satDate);
+      await loadAdmin();
+      await loadMember();
+    });
+    toast(`Missing attendance assigned for ${name}.`);
+  } catch (err) {
+    toast(friendlyError(err, 'Could not assign attendance.'), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('assignAllPendingBtn')?.addEventListener('click', async () => {
+  const satDate = $('saturdayDateSelect')?.value || getActiveSaturdayDate();
+  if (!satDate) return;
+  if (!window.confirm(`Assign missing attendance for ALL unsubmitted members for ${satDate} on the monthly holiday rule basis?`)) return;
+  try {
+    await withLoader('Assigning All Missing', `Recording missing attendance for ${satDate}`, async () => {
+      const { data: count, error } = await supabase.rpc('choir_mark_missing_attendance', { p_date: satDate, p_user_id: null });
+      if (error) throw error;
+      await loadUnsubmittedSaturday(satDate);
+      await loadAdmin();
+      await loadMember();
+      const num = Number(count) || 0;
+      toast(num > 0 ? `Assigned missing attendance for ${num} member${num === 1 ? '' : 's'}.` : 'No unsubmitted members needed assignment.');
+    });
+  } catch (err) {
+    toast(friendlyError(err, 'Could not assign missing attendance.'), 'error');
+  }
+});
+
+// Admin Statistics Month Filter Change
+$('adminStatsMonthFilter')?.addEventListener('change', () => {
+  renderAdminStats($('adminStatsMonthFilter').value);
+});
+
+$('refreshAdminStatsBtn')?.addEventListener('click', () => {
+  renderAdminStats($('adminStatsMonthFilter')?.value || 'all');
+  toast('Admin stats refreshed.');
+});
+
+// Working Months Management (N Months)
+$('addMonthForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const month = $('newMonthName')?.value.trim();
+  const days = Number($('newMonthDays')?.value);
+  const setActive = $('newMonthActive')?.checked || false;
+  if (!month) return toast('Enter a month name.', 'error');
+  if (!days || days < 1 || days > 6) return toast('Working days must be between 1 and 6.', 'error');
+  try {
+    await withLoader('Saving Month', `Configuring ${month}`, async () => {
+      const { error } = await supabase.rpc('choir_admin_add_month', {
+        p_month: month,
+        p_working_days: days,
+        p_set_active: setActive
+      });
+      if (error) throw error;
+      if (setActive) {
+        settings.month_name = month;
+        settings.working_days = days;
+        text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`);
+      }
+      event.target.reset();
+      await loadMonthsList();
+      await loadMember();
+      await loadAdmin();
+    });
+    toast(`Month ${month} saved successfully.`);
+  } catch (err) {
+    toast(friendlyError(err, 'Could not save month.'), 'error');
+  }
+});
+
+$('monthsListRows')?.addEventListener('click', async event => {
+  const setActiveBtn = event.target.closest('[data-set-active-month]');
+  const editBtn = event.target.closest('[data-edit-month-days]');
+  const deleteBtn = event.target.closest('[data-delete-month]');
+
+  if (setActiveBtn) {
+    const month = setActiveBtn.dataset.setActiveMonth;
+    if (!month) return;
+    try {
+      await withLoader('Setting Active Month', `Activating ${month}`, async () => {
+        const { error } = await supabase.rpc('choir_admin_set_active_month', { p_month: month });
+        if (error) throw error;
+        const { data: updated } = await supabase.from('choir_settings').select('month_name,working_days').eq('id', 1).single();
+        if (updated) settings = updated;
+        text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`);
+        await loadMonthsList();
+        await loadMember();
+        await loadAdmin();
+      });
+      toast(`${month} is now the active month.`);
+    } catch (err) {
+      toast(friendlyError(err, 'Could not activate month.'), 'error');
+    }
+  } else if (editBtn) {
+    const month = editBtn.dataset.editMonthDays;
+    const curDays = editBtn.dataset.days;
+    const input = window.prompt(`Enter working Saturdays for ${month} (1 to 6):`, curDays);
+    if (!input) return;
+    const newDays = Number(input.trim());
+    if (!Number.isInteger(newDays) || newDays < 1 || newDays > 6) return toast('Working days must be 1 to 6.', 'error');
+    try {
+      await withLoader('Updating Days', `Updating ${month} to ${newDays} days`, async () => {
+        const { error } = await supabase.rpc('choir_admin_add_month', { p_month: month, p_working_days: newDays, p_set_active: false });
+        if (error) throw error;
+        if (settings.month_name === month) {
+          settings.working_days = newDays;
+          text('monthLabel', `${settings.month_name} • ${settings.working_days} working Saturday${settings.working_days === 1 ? '' : 's'}`);
+        }
+        await loadMonthsList();
+        await loadMember();
+        await loadAdmin();
+      });
+      toast(`${month} updated to ${newDays} working Saturdays.`);
+    } catch (err) {
+      toast(friendlyError(err, 'Could not update working days.'), 'error');
+    }
+  } else if (deleteBtn) {
+    const month = deleteBtn.dataset.deleteMonth;
+    if (!month) return;
+    if (!window.confirm(`Delete month "${month}"?`)) return;
+    try {
+      await withLoader('Deleting Month', `Removing ${month}`, async () => {
+        const { error } = await supabase.rpc('choir_admin_delete_month', { p_month: month });
+        if (error) throw error;
+        await loadMonthsList();
+        await loadAdmin();
+      });
+      toast(`Month ${month} deleted.`);
+    } catch (err) {
+      toast(friendlyError(err, 'Could not delete month.'), 'error');
+    }
+  }
+});
+
+// CSV Export by Selected Month
+$('csvExport')?.addEventListener('click', async () => {
+  const selectedMonth = $('csvMonthSelect')?.value || settings?.month_name;
+  try {
+    await withLoader('Preparing CSV', `Collecting attendance data for ${selectedMonth}`, async () => {
       const { data, error } = await supabase.from('choir_attendance_stack')
         .select('symbol,datefilled,month_name,name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status')
-        .eq('month_name', settings.month_name)
+        .eq('month_name', selectedMonth)
         .order('datefilled');
       if (error) throw error;
       const headers = ['Symbol', 'Datefilled', 'Month', 'Name', 'Reason', 'Time filled', 'Point', 'Holiday used', 'Attendance on time', 'Status'];
       const csv = [headers, ...data.map(Object.values)].map(row => row.map(v => `"${String(v ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
       const link = document.createElement('a');
       link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-      link.download = `${settings.month_name}-choir-attendance.csv`;
+      link.download = `${selectedMonth}-choir-attendance.csv`;
       link.click();
       URL.revokeObjectURL(link.href);
     });
