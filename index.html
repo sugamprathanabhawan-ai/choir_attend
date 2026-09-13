@@ -264,12 +264,12 @@
                   </div>
                   <div class="flex-1">
                     <div class="flex items-center gap-2">
-                      <span class="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-amber-900">Rule 2 • On-Time & Continuous Streak</span>
+                      <span class="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-amber-900">Rule 2 • On-Time & Present Streak</span>
                       <span class="text-xs font-black text-black">9:50 AM Cutoff</span>
                     </div>
-                    <h3 class="mt-1 text-lg font-black text-black">Continuous On-Time Streak & Score</h3>
+                    <h3 class="mt-1 text-lg font-black text-black">On-Time Cutoff & Present Streak</h3>
                     <p class="mt-1 text-sm text-black font-medium leading-relaxed">
-                      Submit before or at <b>9:50 AM</b> to earn an <b>On-Time point</b>. When you submit on time Saturday after Saturday <b>continuously without a single gap</b>, you grow your <b>🔥 On-Time Streak</b>! If you miss or submit late, your streak resets, but your <b>monthly On-Time total</b> is always saved and shown in the table.
+                      Submit before or at <b>9:50 AM</b> to earn an <b>On-Time point</b> for the month. Your <b>Streak</b> tracks the <b>total Saturdays you have been present till date</b> across all your choir history.
                     </p>
                   </div>
                 </div>
@@ -323,7 +323,7 @@
                     </div>
                     <h3 class="mt-1 text-lg font-black text-black">Earn a -1 Point bonus reward!</h3>
                     <p class="mt-1 text-sm text-black font-medium leading-relaxed">
-                      If you attend on time for <b>all working Saturdays in a month</b> (e.g. 4 on-time attendances in a 4-Saturday month), you earn an automatic <b>-1 point deduction</b> from your total points!
+                      When your on-time attendance meets all working Saturdays in a month (e.g. 4 on-time in a 4-Saturday month), you qualify for a <b>-1 point deduction</b> validated by the choir administrator!
                     </p>
                   </div>
                 </div>
@@ -400,6 +400,7 @@
                   <th class="p-3.5">Total points</th>
                   <th class="p-3.5">Holiday used</th>
                   <th class="p-3.5">Ontime</th>
+                  <th class="p-3.5">Streak (Present)</th>
                   <th class="p-3.5">Status</th>
                 </tr>
               </thead>
@@ -428,7 +429,42 @@
           </div>
         </div>
 
-        <!-- Saturday Attendance Pending Card -->
+        <!-- Extra Table Part 1: Monthly Perfect On-Time Review (Bonus -1 Action Table) -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div class="flex items-center gap-3">
+                <h2 class="text-xl font-black text-black">Monthly Perfect On-Time Review</h2>
+                <span id="bonusQualCount" class="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-black text-blue-900 border border-blue-200">0 qualifying</span>
+              </div>
+              <p id="bonusReviewCaption" class="mt-1 text-xs sm:text-sm font-semibold text-black">Members who reached working Saturdays on-time. Click Valid to award -1 point, or Exclude to remove.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <label for="bonusMonthSelect" class="text-xs font-black uppercase text-black">Month:</label>
+              <select id="bonusMonthSelect" class="input w-auto py-1.5 px-3 text-sm font-bold"></select>
+              <button id="refreshBonusBtn" type="button" class="secondary-btn py-1.5 px-3 text-xs" title="Refresh qualifying members">
+                <i class="fa-solid fa-arrows-rotate"></i>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap mt-4">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Symbol</th>
+                  <th>Month</th>
+                  <th>On-time</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="bonusReviewRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Extra Table Part 2: Saturday Attendance Pending & Assign -->
         <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -438,9 +474,12 @@
               </div>
               <p id="unsubmittedCaption" class="mt-1 text-xs sm:text-sm font-semibold text-black">Approved members who have not yet submitted attendance for Saturday.</p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <label for="saturdayDateSelect" class="text-xs font-black uppercase text-black">Date:</label>
               <input id="saturdayDateSelect" type="date" class="input w-auto py-1.5 px-3 text-sm">
+              <button id="assignAllPendingBtn" type="button" class="primary-btn py-1.5 px-3.5 text-xs whitespace-nowrap shadow-sm">
+                <i class="fa-solid fa-user-check mr-1"></i> Assign All Missing
+              </button>
               <button id="refreshUnsubmittedBtn" type="button" class="secondary-btn py-1.5 px-3 text-xs" title="Refresh attendance status">
                 <i class="fa-solid fa-arrows-rotate"></i>
               </button>
@@ -455,9 +494,44 @@
                   <th>Email</th>
                   <th>Phone</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="unsubmittedRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Admin Statistics Table with Month Filter -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-xl font-black text-black">Member Statistics (Monthly & Historical)</h2>
+              <p id="adminStatsCaption" class="mt-1 text-xs sm:text-sm font-semibold text-black">Filter statistics by any configured month or view all-time cumulative scores.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <label for="adminStatsMonthFilter" class="text-xs font-black uppercase text-black">Filter by Month:</label>
+              <select id="adminStatsMonthFilter" class="input w-auto py-1.5 px-3 text-sm font-bold">
+                <option value="all">All-Time Cumulative</option>
+              </select>
+              <button id="refreshAdminStatsBtn" type="button" class="secondary-btn py-1.5 px-3 text-xs" title="Refresh stats">
+                <i class="fa-solid fa-arrows-rotate"></i>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap mt-4">
+            <table>
+              <thead id="adminStatsHead">
+                <tr>
+                  <th>Name</th>
+                  <th>Total points</th>
+                  <th>Holiday used</th>
+                  <th>Ontime</th>
+                  <th>Streak (Present)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="adminStatsRows"></tbody>
             </table>
           </div>
         </section>
@@ -512,21 +586,64 @@
             </form>
           </section>
 
-          <!-- Working Month Settings & CSV -->
-          <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
-            <h2 class="text-xl font-black text-black">Working Month Settings</h2>
-            <form id="settingsForm" class="mt-4 space-y-3">
-              <input id="settingMonth" class="input" placeholder="Month name (e.g. Baisakh)" required>
-              <input id="settingDays" type="number" min="1" max="6" class="input" placeholder="Working Saturdays in month (e.g. 4)" required>
-              <button class="primary-btn" type="submit">Save month settings</button>
+          <!-- Working Months Management (N Months) & CSV Export -->
+          <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
+            <div>
+              <h2 class="text-xl font-black text-black">Working Months (N Months)</h2>
+              <p class="mt-1 text-xs sm:text-sm font-semibold text-black">Add any N number of months with working Saturdays and toggle the active month.</p>
+            </div>
+
+            <!-- Add / Update Month Form -->
+            <form id="addMonthForm" class="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label class="label">Month Name</label>
+                  <input id="newMonthName" class="input py-2 text-sm" placeholder="e.g. Baisakh" required>
+                </div>
+                <div>
+                  <label class="label">Working Saturdays (1–6)</label>
+                  <input id="newMonthDays" type="number" min="1" max="6" class="input py-2 text-sm" placeholder="e.g. 4" required>
+                </div>
+              </div>
+              <div class="flex items-center justify-between pt-1">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                  <input id="newMonthActive" type="checkbox" class="h-4 w-4 rounded accent-blue-600">
+                  <span class="text-xs font-bold text-black">Set as Active Month</span>
+                </label>
+                <button class="primary-btn py-1.5 px-4 text-xs font-black shadow-sm" type="submit">
+                  <i class="fa-solid fa-plus mr-1"></i> Save Month
+                </button>
+              </div>
             </form>
-            <div class="mt-6 border-t border-slate-200 pt-5">
-              <p class="text-sm font-bold text-black">Export active month records</p>
-              <button id="csvExport" class="secondary-btn mt-2" type="button">
-                <i class="fa-solid fa-file-arrow-down text-emerald-600"></i>
-                <span>Download CSV</span>
-              </button>
-              <p class="mt-2 text-xs font-semibold text-black/70">Downloads active month attendance records for spreadsheets.</p>
+
+            <!-- Configured Months Table -->
+            <div class="table-wrap max-h-48">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Month Name</th>
+                    <th>Working Days</th>
+                    <th>Active</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="monthsListRows"></tbody>
+              </table>
+            </div>
+
+            <!-- CSV Export by Month -->
+            <div class="border-t border-slate-200 pt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p class="text-xs font-bold text-black">Export Records to CSV</p>
+                <p class="text-xs font-semibold text-black/70">Downloads attendance records for selected month.</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <select id="csvMonthSelect" class="input w-auto py-1.5 px-3 text-xs font-bold"></select>
+                <button id="csvExport" class="secondary-btn py-1.5 px-3 text-xs font-black" type="button">
+                  <i class="fa-solid fa-file-arrow-down text-emerald-600 mr-1"></i>
+                  <span>Download CSV</span>
+                </button>
+              </div>
             </div>
           </section>
         </div>
@@ -542,7 +659,7 @@
 
   <!-- Scripts -->
   <script src="./js/config.js"></script>
-  <script type="module" src="./js/app.js?v=20260905-butter-v2"></script>
+  <script type="module" src="./js/app.js?v=20260913-features-v3"></script>
 
   <!-- Butter Smooth Light Mode Styling -->
   <style>
