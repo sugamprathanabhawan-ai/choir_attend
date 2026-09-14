@@ -32,7 +32,7 @@ Use **Reset password by email** in the app whenever the administrator password n
    - `SUPABASE_SERVICE_ROLE_KEY` — Project Settings → API → service_role key
    - `APP_URL` — your deployed Vercel URL
 4. In the sheet, use **Sugam Choir → Set up / repair tabs**, authorize it, then use **Sugam Choir → Install Saturday schedule**.
-5. The script sends reminders only on Saturdays at approximately 9:40 AM, 3:00 PM, and 9:30 PM Nepal time. At 11:01 PM it adds a `1 / 1 / 0` row for each approved member who did not submit. It also syncs the sheet’s Aggregate, Attendance Stack, Personal Laws, and Settings tabs from Supabase. Use the same **Sugam Choir** menu to create `.xlsx` and `.csv` export files in Drive.
+5. The script sends reminders only on Saturdays at approximately 9:40 AM, 3:00 PM, and 9:30 PM Nepal time. At 11:01 PM it records missing attendance on the monthly holiday rule basis for each approved member who did not submit (`0/1/0` if first holiday of month; `1/1/0` if holiday was already used). It also syncs the sheet’s Aggregate, Attendance Stack, Personal Laws, and Settings tabs from Supabase. Use the same **Sugam Choir** menu to create `.xlsx` and `.csv` export files in Drive.
 
 Apps Script time triggers run within a few minutes of their requested time, so the script deliberately checks Nepal time every five minutes and records each action once per Saturday.
 
@@ -46,8 +46,13 @@ Apps Script time triggers run within a few minutes of their requested time, so t
 ## Attendance rules implemented
 
 - Form: Saturday only, 3:00 AM–11:00 PM Nepal time.
-- Before or at 9:50 AM: Present = `0/0/1`; absent uses a holiday flag, and becomes `1/1/1` if a holiday has already been used.
-- After 9:50 AM: first submitted record = `0/1/0`; records after a holiday has already been used = `1/1/0` (present or absent).
-- Missing form at 11:01 PM Saturday = `1/1/0`.
+- Before or at 9:50 AM: Present = `0/0/1`; absent uses a holiday flag (`0/1/1`), and becomes `1/1/1` if a holiday has already been used in the active month.
+- After 9:50 AM (late submission): first late/absent record of the month = `0/1/0`; subsequent records after a holiday has already been used = `1/1/0` (present or absent).
+- Missing form at/after 11:00 PM Saturday: calculated strictly on the monthly holiday rule basis — first missed record of the month = `0/1/0` (uses the 1 monthly free holiday); subsequent missed records after a holiday has already been used = `1/1/0` (incurs 1 penalty point).
+- Perfect monthly on-time attendance: when a member's on-time attendance equals or exceeds the active month's working days (`ontime == working_days`), a `-1` point deduction occurs on their aggregate points.
 
 All flags and points are calculated inside Postgres, not trusted from the browser clock.
+
+## Master Documentation & Architecture
+
+For complete database schemas, stored procedure logic, frontend structure, and guidelines for future updates, see [`SYSTEM_DOCUMENTATION.md`](SYSTEM_DOCUMENTATION.md).

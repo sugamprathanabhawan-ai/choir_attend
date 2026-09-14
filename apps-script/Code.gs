@@ -51,13 +51,13 @@ function runSaturdaySchedule() {
   if (weekday !== '6') return;
   const date = Utilities.formatDate(now, TZ, 'yyyy-MM-dd');
   const clock = Utilities.formatDate(now, TZ, 'HH:mm');
-  if (clock >= '09:40' && clock < '09:50') sendReminderOnce_(date, '0940', 'Attendance window closes at 9:50 AM',
+  if (clock >= '09:40' && clock < '10:05') sendReminderOnce_(date, '0940', 'Attendance window closes at 9:50 AM',
     'Please fill in your choir attendance now. The on-time window closes at 9:50 AM Nepal time.');
-  if (clock >= '15:00' && clock < '15:10') sendReminderOnce_(date, '1500', 'Please complete today’s attendance',
+  if (clock >= '15:00' && clock < '15:30') sendReminderOnce_(date, '1500', 'Please complete today’s attendance',
     'You have not filled attendance today. If you are absent, please choose Absent and enter a valid reason before 11:00 PM.');
-  if (clock >= '21:30' && clock < '21:40') sendReminderOnce_(date, '2130', 'Final attendance reminder',
+  if (clock >= '21:30' && clock < '22:00') sendReminderOnce_(date, '2130', 'Final attendance reminder',
     'Today’s attendance form closes at 11:00 PM Nepal time. Please submit now.');
-  if (clock >= '23:01' && clock < '23:15') markMissingOnce_(date);
+  if (clock >= '23:00') markMissingOnce_(date);
 }
 
 function sendReminderOnce_(date, label, subject, message) {
@@ -66,15 +66,23 @@ function sendReminderOnce_(date, label, subject, message) {
   const outstanding = outstandingMembers_(date);
   if (!outstanding.length) { PropertiesService.getScriptProperties().setProperty(key, 'none'); return; }
   const appUrl = config_().APP_URL;
-  outstanding.forEach(member => GmailApp.sendEmail(member.email, subject, `${message}\n\nOpen Sugam Choir: ${appUrl}`, { name: 'Sugam Prathana Bhawan' }));
-  PropertiesService.getScriptProperties().setProperty(key, String(outstanding.length));
+  let sentCount = 0;
+  outstanding.forEach(member => {
+    try {
+      GmailApp.sendEmail(member.email, subject, `${message}\n\nOpen Sugam Choir: ${appUrl}`, { name: 'Sugam Prathana Bhawan' });
+      sentCount++;
+    } catch (err) {
+      console.warn(`Could not send reminder to ${member.email}: ${err.message}`);
+    }
+  });
+  PropertiesService.getScriptProperties().setProperty(key, String(sentCount));
 }
 
 function markMissingOnce_(date) {
   const key = `missing_${date}`;
   if (PropertiesService.getScriptProperties().getProperty(key)) return;
-  // This protected Postgres function creates the required 1/1/0 rows only for members without a row.
-  supabaseRpc_('choir_mark_missing_attendance', {});
+  // This protected Postgres function creates missing attendance rows strictly on the monthly holiday rule basis.
+  supabaseRpc_('choir_mark_missing_attendance', { p_date: date });
   PropertiesService.getScriptProperties().setProperty(key, 'done');
   syncWorkbook();
 }

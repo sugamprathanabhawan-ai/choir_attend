@@ -126,9 +126,13 @@ async function withLoader(title, message, action) {
 const submitButton = form => form?.querySelector('button[type="submit"], button:not([type])');
 
 function escape(value = '') {
-  const el = document.createElement('span');
-  el.textContent = value;
-  return el.innerHTML;
+  return String(value ?? '').replace(/[&<>'"]/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  })[char]);
 }
 
 function nptNow() {
@@ -592,16 +596,23 @@ function getActiveSaturdayDate() {
   return nptDate(sat);
 }
 
+function isDateSaturday(dateStr) {
+  if (!dateStr) return false;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return false;
+  const dt = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  return dt.getUTCDay() === 6;
+}
+
 // Load Member Dashboard Data
 async function loadMember() {
   text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
   const today = nptDate();
 
-  const [lawResult, aggregateResult, attendanceResult, stackPointsResult, streakRpcResult] = await Promise.all([
+  const [lawResult, aggregateResult, attendanceResult, streakRpcResult] = await Promise.all([
     supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).limit(1),
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
     supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').order('time_filled', { ascending: false }).limit(1),
-    supabase.from('choir_attendance_stack').select('user_id,point,datefilled,attendance_on_time,attendance_status').lte('datefilled', today).order('datefilled', { ascending: false }).limit(5000),
     Promise.resolve(supabase.rpc('choir_get_member_streaks')).catch(err => { console.warn('Streak RPC notice:', err); return { data: null }; })
   ]);
 
@@ -616,15 +627,6 @@ async function loadMember() {
     text('personalLaw', personalLaw);
   }
 
-  const stackPointsByUser = {};
-  const userPresentCount = {};
-  (stackPointsResult?.data || []).forEach(row => {
-    stackPointsByUser[row.user_id] = (stackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
-    if (row.attendance_status === 'present') {
-      userPresentCount[row.user_id] = (userPresentCount[row.user_id] || 0) + 1;
-    }
-  });
-
   const streakByUser = {};
   (streakRpcResult?.data || []).forEach(item => {
     if (item.user_id && item.streak !== undefined) {
@@ -632,29 +634,19 @@ async function loadMember() {
     }
   });
 
-  const aggregates = (aggregateResult.data || []).map(row => {
-    const rawStackPoints = stackPointsByUser[row.user_id];
-    const totalPoints = rawStackPoints !== undefined ? rawStackPoints : (Number(row.total_points) || 0);
-    return {
-      ...row,
-      total_points: totalPoints
-    };
-  });
+  const aggregates = (aggregateResult.data || []).map(row => ({
+    ...row,
+    total_points: Number(row.total_points) || 0
+  }));
 
-  const agg = aggregates.find(row => row.user_id === user.id) || { total_points: 0, total_holiday_used: 0, total_attendance_on_time: 0 };
-  if (stackPointsByUser[user.id] !== undefined) {
-    agg.total_points = stackPointsByUser[user.id];
-  }
-
-  const myStreak = userPresentCount[user.id] ?? (agg.on_time_streak !== undefined && agg.on_time_streak !== null ? Number(agg.on_time_streak) : (streakByUser[user.id] || 0));
+  const agg = aggregates.find(row => row.user_id === user.id) || { total_points: 0, total_holiday_used: 0, total_attendance_on_time: 0, on_time_streak: 0 };
+  const myStreak = streakByUser[user.id] ?? (agg.on_time_streak !== undefined && agg.on_time_streak !== null ? Number(agg.on_time_streak) : 0);
   const streakNote = ` • total present Saturdays: ${myStreak}`;
 
   // Render Member Statistics (6 Columns)
   $('memberStats').innerHTML = aggregates.map(row => {
     const isFine = Number(row.total_points) >= 10;
-    const streak = userPresentCount[row.user_id] ?? ((row.on_time_streak !== undefined && row.on_time_streak !== null)
-      ? Number(row.on_time_streak)
-      : (streakByUser[row.user_id] || 0));
+    const streak = streakByUser[row.user_id] ?? (Number(row.on_time_streak) || 0);
     const onTimeCount = Number(row.total_attendance_on_time) || 0;
     return `<tr class="${isFine ? 'fine-row' : 'hover:bg-slate-50 transition-colors'}">
       <td class="p-3.5 font-bold text-black">${escape(row.name)}</td>
@@ -747,7 +739,10 @@ $('attendanceForm')?.addEventListener('submit', async event => {
 
 // Admin Unsubmitted Saturday Attendance Table
 async function loadUnsubmittedSaturday(targetDate) {
-  const satDate = targetDate || $('saturdayDateSelect')?.value || getActiveSaturdayDate();
+  let satDate = targetDate || $('saturdayDateSelect')?.value || getActiveSaturdayDate();
+  if (!isDateSaturday(satDate)) {
+    satDate = getActiveSaturdayDate();
+  }
   if ($('saturdayDateSelect') && $('saturdayDateSelect').value !== satDate) {
     $('saturdayDateSelect').value = satDate;
   }
@@ -1075,10 +1070,9 @@ async function loadAdmin() {
   }
   const syncRequest = supabase.rpc('choir_sync_missing_symbols');
 
-  const [aggregates, pending, allPointsResult] = await Promise.all([
+  const [aggregates, pending] = await Promise.all([
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
-    supabase.from('choir_profiles').select('id,full_name,email,phone_num,symbolnum').eq('status', 'pending').order('created_at'),
-    supabase.from('choir_attendance_stack').select('user_id,point,datefilled').lte('datefilled', today)
+    supabase.from('choir_profiles').select('id,full_name,email,phone_num,symbolnum').eq('status', 'pending').order('created_at')
   ]);
 
   if (aggregates.error || pending.error) {
@@ -1089,19 +1083,10 @@ async function loadAdmin() {
     if (res?.error && res.error.code !== '42883') console.warn('Symbol sync notice:', res.error);
   }).catch(() => {});
 
-  const adminStackPointsByUser = {};
-  (allPointsResult?.data || []).forEach(row => {
-    adminStackPointsByUser[row.user_id] = (adminStackPointsByUser[row.user_id] || 0) + (Number(row.point) || 0);
-  });
-
-  const adminAggregates = (aggregates.data || []).map(r => {
-    const rawStackPoints = adminStackPointsByUser[r.user_id];
-    const totalPoints = rawStackPoints !== undefined ? rawStackPoints : (Number(r.total_points) || 0);
-    return {
-      ...r,
-      total_points: totalPoints
-    };
-  });
+  const adminAggregates = (aggregates.data || []).map(r => ({
+    ...r,
+    total_points: Number(r.total_points) || 0
+  }));
 
   await loadMonthsList();
   await loadBonusReview($('bonusMonthSelect')?.value);
@@ -1314,8 +1299,20 @@ $('memberDetailSelect')?.addEventListener('change', () => {
 });
 
 $('saturdayDateSelect')?.addEventListener('change', async () => {
+  const chosen = $('saturdayDateSelect').value;
+  if (chosen && !isDateSaturday(chosen)) {
+    const snapped = getActiveSaturdayDate();
+    $('saturdayDateSelect').value = snapped;
+    toast(`Please choose a Saturday. Reset to Saturday (${snapped}).`, 'error');
+    try {
+      await withLoader('Loading status', 'Updating Saturday attendance status', () => loadUnsubmittedSaturday(snapped));
+    } catch (error) {
+      toast(friendlyError(error, 'Could not load attendance for that date.'), 'error');
+    }
+    return;
+  }
   try {
-    await withLoader('Loading status', 'Updating Saturday attendance status', () => loadUnsubmittedSaturday($('saturdayDateSelect').value));
+    await withLoader('Loading status', 'Updating Saturday attendance status', () => loadUnsubmittedSaturday(chosen));
   } catch (error) {
     toast(friendlyError(error, 'Could not load attendance for that date.'), 'error');
   }
@@ -1645,7 +1642,11 @@ $('csvExport')?.addEventListener('click', async () => {
         .order('datefilled');
       if (error) throw error;
       const headers = ['Symbol', 'Datefilled', 'Month', 'Name', 'Reason', 'Time filled', 'Point', 'Holiday used', 'Attendance on time', 'Status'];
-      const csv = [headers, ...data.map(Object.values)].map(row => row.map(v => `"${String(v ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
+      const rows = (data || []).map(r => [
+        r.symbol, r.datefilled, r.month_name, r.name, r.reason,
+        r.time_filled, r.point, r.holiday_used, r.attendance_on_time, r.attendance_status
+      ]);
+      const csv = [headers, ...rows].map(row => row.map(v => `"${String(v ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
       const link = document.createElement('a');
       link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
       link.download = `${selectedMonth}-choir-attendance.csv`;
