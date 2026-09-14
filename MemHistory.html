@@ -238,10 +238,15 @@
             const photoUrlByPath = new Map((signedPhotos || [])
               .filter(photo => photo.signedUrl)
               .map(photo => [photo.path, photo.signedUrl]));
-            const currentMembersWithPhotos = currentMembers.map(member => ({
-              ...member,
-              profilePicUrl: photoUrlByPath.get(photoPathFor(member)) || null
-            }));
+            const currentMembersWithPhotos = currentMembers.map(member => {
+              const path = photoPathFor(member);
+              const signed = photoUrlByPath.get(path);
+              const publicUrl = signed || supabaseClient.storage.from('choir-selfies').getPublicUrl(path)?.data?.publicUrl;
+              return {
+                ...member,
+                profilePicUrl: publicUrl || null
+              };
+            });
             document.getElementById('currentCount').textContent = `${currentMembersWithPhotos.length} Active`;
             currentBody.innerHTML = currentMembersWithPhotos.map(m => `
               <tr class="hover:bg-primary-50/50 transition">

@@ -288,8 +288,9 @@ begin
   end if;
 
   -- Protect today's ongoing Saturday attendance window:
-  -- Nobody can mark missing for today until after 11:00 PM Nepal time
-  if npt_date = (npt_now)::date and (npt_now)::time < time '23:00' then
+  -- Automated/batch runs cannot mark missing for today until after 11:00 PM Nepal time,
+  -- but an admin can explicitly assign missing attendance for an individual member anytime.
+  if p_user_id is null and npt_date = (npt_now)::date and (npt_now)::time < time '23:00' then
     raise exception 'Missing attendance for today cannot be marked until after 11:00 PM Nepal time.';
   end if;
 
@@ -581,9 +582,9 @@ create policy "past members public read" on public.past_members for select using
 drop policy if exists "past members admin write" on public.past_members;
 create policy "past members admin write" on public.past_members for all using (public.choir_is_admin()) with check (public.choir_is_admin());
 
--- Storage for 10 KB compressed JPG selfies.
+-- Storage for compressed selfies (up to 1 MB limit).
 insert into storage.buckets (id,name,public,file_size_limit,allowed_mime_types)
-values ('choir-selfies','choir-selfies',false,10240,array['image/jpeg'])
+values ('choir-selfies','choir-selfies',false,1048576,array['image/jpeg','image/png'])
 on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 drop policy if exists "choir selfie own upload" on storage.objects;
 create policy "choir selfie own upload" on storage.objects for insert to authenticated with check (bucket_id = 'choir-selfies' and (storage.foldername(name))[1] = auth.uid()::text);

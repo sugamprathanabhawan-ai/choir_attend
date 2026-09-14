@@ -231,8 +231,9 @@ begin
   end if;
 
   -- Protect today's ongoing Saturday attendance window:
-  -- Nobody can mark missing for today until after 11:00 PM Nepal time
-  if npt_date = (npt_now)::date and (npt_now)::time < time '23:00' then
+  -- Automated/batch runs cannot mark missing for today until after 11:00 PM Nepal time,
+  -- but an admin can explicitly assign missing attendance for an individual member anytime.
+  if p_user_id is null and npt_date = (npt_now)::date and (npt_now)::time < time '23:00' then
     raise exception 'Missing attendance for today cannot be marked until after 11:00 PM Nepal time.';
   end if;
 
@@ -326,7 +327,12 @@ end;
 $$;
 grant execute on function public.choir_admin_delete_month(text) to authenticated;
 
--- 11. Allow public view on choir-selfies storage so MemHistory.html loads without 403
+-- 11. Allow public view on choir-selfies storage so MemHistory.html loads without 403, and update file size limit
+update storage.buckets
+set file_size_limit = 1048576,
+    allowed_mime_types = array['image/jpeg', 'image/png']
+where id = 'choir-selfies';
+
 drop policy if exists "choir selfie public view" on storage.objects;
 create policy "choir selfie public view" on storage.objects for select using (bucket_id = 'choir-selfies');
 
@@ -350,5 +356,112 @@ create policy "past members admin write" on public.past_members for all using (p
 grant select on public.choir_member_history_current to anon, authenticated;
 grant select on public.past_members to anon, authenticated;
 
--- 13. Rebuild aggregate table immediately
+-- 13. Admin Tools: Delete Stack Row, Add Manual Points, and Symbol Sync
+create or replace function public.choir_admin_delete_stack_row(p_stack_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.choir_is_admin() then raise exception 'Administrator access required.'; end if;
+  delete from public.choir_attendance_stack where id = p_stack_id;
+end;
+$$;
+grant execute on function public.choir_admin_delete_stack_row(uuid) to authenticated;
+
+create or replace function public.choir_admin_add_manual_points(p_user_id uuid, p_points integer)
+returns integer language plpgsql security definer set search_path = public as $$
+declare
+  p public.choir_profiles;
+  active_month text;
+  i integer;
+  inserted_count integer := 0;
+begin
+  if not public.choir_is_admin() then raise exception 'Administrator access required.'; end if;
+  if p_points < 1 or p_points > 100 then raise exception 'Manual points must be between 1 and 100.'; end if;
+  select * into p from public.choir_profiles where id = p_user_id;
+  if not found then raise exception 'Approved member not found.'; end if;
+  select month_name into active_month from public.choir_settings where id = 1;
+  for i in 1..p_points loop
+    insert into public.choir_attendance_stack (
+      user_id, symbol, datefilled, month_name, name, reason, time_filled, point, holiday_used, attendance_on_time, attendance_status
+    ) values (
+      p.id, coalesce(p.symbolnum, '—'), (now() at time zone 'Asia/Kathmandu')::date,
+      active_month, p.full_name, 'Manual point added by admin', now(), 1, 0, 0, 'manual'
+    );
+    inserted_count := inserted_count + 1;
+  end loop;
+  return inserted_count;
+end;
+$$;
+grant execute on function public.choir_admin_add_manual_points(uuid, integer) to authenticated;
+
+create or replace function public.choir_sync_missing_symbols()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.choir_is_admin() then return; end if;
+  update public.choir_profiles p
+  set symbolnum = coalesce(nullif(trim(u.raw_user_meta_data->>'symbolnum'), ''), p.symbolnum)
+  from auth.users u
+  where p.id = u.id and p.symbolnum is null and u.raw_user_meta_data->>'symbolnum' is not null;
+end;
+$$;
+create or replace function public.choir_symbol_available(p_symbol text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select not exists (
+    select 1 from public.choir_profiles where lower(trim(symbolnum)) = lower(trim(p_symbol))
+  );
+$$;
+grant execute on function public.choir_symbol_available(text) to authenticated, anon;
+
+create or replace function public.choir_save_selfie(p_path text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_path !~ ('^' || auth.uid()::text || '/selfie\\.jpg$') then
+    raise exception 'Invalid selfie path.';
+  end if;
+  update public.choir_profiles set selfie_path = p_path where id = auth.uid();
+end;
+$$;
+grant execute on function public.choir_save_selfie(text) to authenticated;
+
+create or replace function public.choir_submit_attendance(p_symbol text, p_status text, p_reason text default null)
+returns public.choir_attendance_stack language plpgsql security definer set search_path = public as $$
+declare
+  p public.choir_profiles;
+  npt timestamptz := now() at time zone 'Asia/Kathmandu';
+  npt_date date := (now() at time zone 'Asia/Kathmandu')::date;
+  npt_time time := (now() at time zone 'Asia/Kathmandu')::time;
+  already_holidays integer;
+  outrow public.choir_attendance_stack;
+  active_month text;
+  v_point smallint;
+  v_holiday smallint;
+  v_on_time smallint;
+begin
+  select * into p from public.choir_profiles where id = auth.uid();
+  if not found or p.status <> 'approved' then raise exception 'Your account is awaiting administrator approval.'; end if;
+  if p.symbolnum is null or p.symbolnum <> trim(p_symbol) then raise exception 'Your symbol number does not match your account.'; end if;
+  if extract(isodow from npt_date) <> 6 or npt_time < time '03:00' or npt_time > time '23:00' then
+    raise exception 'Attendance opens only Saturday, 3:00 AM–11:00 PM Nepal time.';
+  end if;
+  if p_status not in ('present','absent') then raise exception 'Choose Present or Absent.'; end if;
+  if p_status = 'absent' and length(trim(coalesce(p_reason,''))) < 3 then raise exception 'Please enter a valid absence reason.'; end if;
+  select count(*) into already_holidays from public.choir_attendance_stack s
+    join public.choir_settings st on st.id = 1 where s.user_id = p.id and s.month_name = st.month_name and s.holiday_used = 1;
+  if npt_time <= time '09:50' then
+    v_on_time := 1; v_holiday := case when p_status = 'absent' then 1 else 0 end;
+    v_point := case when p_status = 'absent' and already_holidays > 0 then 1 else 0 end;
+  else
+    v_on_time := 0; v_holiday := 1;
+    v_point := case when already_holidays > 0 then 1 else 0 end;
+  end if;
+  select month_name into active_month from public.choir_settings where id = 1;
+  insert into public.choir_attendance_stack (user_id,symbol,datefilled,month_name,name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status)
+  values (p.id,p.symbolnum,npt_date,active_month,p.full_name,nullif(trim(p_reason),''),now(),v_point,v_holiday,v_on_time,p_status)
+  returning * into outrow;
+  return outrow;
+end;
+$$;
+grant execute on function public.choir_submit_attendance(text, text, text) to authenticated;
+
+-- 14. Rebuild aggregate table immediately
 select public.choir_rebuild_aggregate();
+

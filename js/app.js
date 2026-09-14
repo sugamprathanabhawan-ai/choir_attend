@@ -135,17 +135,48 @@ function escape(value = '') {
   })[char]);
 }
 
+const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
+
+function getNepalDateTime(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const npt = new Date(d.getTime() + NEPAL_OFFSET_MS);
+  const year = npt.getUTCFullYear();
+  const month = String(npt.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(npt.getUTCDate()).padStart(2, '0');
+  const dow = npt.getUTCDay(); // 0 = Sun, 6 = Sat
+  const hours = npt.getUTCHours();
+  const minutes = npt.getUTCMinutes();
+  const seconds = npt.getUTCSeconds();
+  const dateStr = `${year}-${month}-${day}`;
+  return { year, month, day, dow, hours, minutes, seconds, dateStr };
+}
+
 function nptNow() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' }));
+  const dt = getNepalDateTime();
+  return new Date(dt.year, parseInt(dt.month, 10) - 1, parseInt(dt.day, 10), dt.hours, dt.minutes, dt.seconds);
 }
 
 function nptDate(value = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kathmandu',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(value);
+  return getNepalDateTime(value).dateStr;
+}
+
+function getActiveSaturdayDate(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const dt = getNepalDateTime(d);
+  const diffToSat = (dt.dow + 1) % 7; // Sat: 0, Sun: 1, Mon: 2, etc.
+  const satDate = new Date(d.getTime() + NEPAL_OFFSET_MS - diffToSat * 86400000);
+  const year = satDate.getUTCFullYear();
+  const month = String(satDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(satDate.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isDateSaturday(dateStr) {
+  if (!dateStr) return false;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return false;
+  const dt = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  return dt.getUTCDay() === 6;
 }
 
 function nptTime(value) {
@@ -262,31 +293,42 @@ async function compressImage(file) {
   let quality = 0.76;
   let width = Math.min(image.width, 400);
   let height = Math.round(image.height * width / image.width);
+  let bestBlob = null;
   for (let pass = 0; pass < 10; pass++) {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     canvas.getContext('2d').drawImage(image, 0, 0, width, height);
     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
-    if (blob && blob.size <= 10 * 1024) return blob;
+    if (blob) {
+      if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
+      if (blob.size <= 10 * 1024) return blob;
+    }
     width = Math.round(width * 0.78);
     height = Math.round(height * 0.78);
     quality = Math.max(0.25, quality - 0.07);
   }
-  throw new Error('The photo could not be compressed below 10 KB. Please choose a well-lit photo.');
+  if (bestBlob) return bestBlob;
+  throw new Error('The photo could not be processed. Please choose another well-lit photo.');
 }
 
 function savePendingSelfie(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => { sessionStorage.setItem('choir_pending_selfie', reader.result); resolve(); };
+    reader.onload = () => {
+      try {
+        sessionStorage.setItem('choir_pending_selfie', reader.result);
+        localStorage.setItem('choir_pending_selfie', reader.result);
+      } catch {}
+      resolve();
+    };
     reader.onerror = () => reject(new Error('The selfie could not be prepared for upload.'));
     reader.readAsDataURL(blob);
   });
 }
 
 async function uploadPendingSelfie() {
-  const encoded = sessionStorage.getItem('choir_pending_selfie');
+  const encoded = sessionStorage.getItem('choir_pending_selfie') || localStorage.getItem('choir_pending_selfie');
   if (!encoded || !user) return;
   const blob = await (await fetch(encoded)).blob();
   const path = `${user.id}/selfie.jpg`;
@@ -294,7 +336,10 @@ async function uploadPendingSelfie() {
   if (error) throw error;
   const { error: profileError } = await supabase.rpc('choir_save_selfie', { p_path: path });
   if (profileError) throw profileError;
-  sessionStorage.removeItem('choir_pending_selfie');
+  try {
+    sessionStorage.removeItem('choir_pending_selfie');
+    localStorage.removeItem('choir_pending_selfie');
+  } catch {}
 }
 
 // Profile picture listeners
@@ -350,6 +395,7 @@ $('signupForm')?.addEventListener('submit', async event => {
   const symbol = $('signupSymbol').value.trim();
   if (!/^9\d{9}$/.test(phone)) return toast('Use a valid 10-digit Nepali phone number beginning with 9.', 'error');
   if (!symbol) return toast('Please choose a symbol number.', 'error');
+  if (symbol.length < 6) return toast('Your symbol number must be at least 6 characters (used as your password).', 'error');
   if (selfiePreparation) return toast('Your selfie is still compressing. Please wait a moment.', 'error');
   if (!compressedSelfie) return toast('Please add a selfie; it will be compressed to a safe 10 KB JPG.', 'error');
   const button = submitButton(event.currentTarget);
@@ -554,12 +600,17 @@ async function boot(activeUser) {
     supabase.from('choir_settings').select('month_name,working_days').eq('id', 1).single()
   ]);
 
-  if (profileError || settingsError) {
-    return toast(friendlyError(profileError || settingsError, 'Could not open your choir portal. Please try again.'), 'error');
+  if (profileError) {
+    console.error('Profile load error:', profileError);
+    if (profileError.code === 'PGRST116' || String(profileError.message || '').includes('0 rows')) {
+      await supabase.auth.signOut({ scope: 'local' });
+      return toast('Choir profile not found. Please register or sign in again.', 'error');
+    }
+    return toast(friendlyError(profileError, 'Could not open your choir portal. Please try again.'), 'error');
   }
 
   profile = nextProfile;
-  settings = nextSettings;
+  settings = nextSettings || { month_name: 'Baisakh', working_days: 4 };
 
   $('authView')?.classList.add('hidden');
   $('appView')?.classList.remove('hidden');
@@ -587,32 +638,16 @@ async function boot(activeUser) {
   }
 }
 
-// Active Saturday Date in Nepal Time
-function getActiveSaturdayDate() {
-  const npt = nptNow();
-  const day = npt.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-  const diffToSat = (day + 1) % 7; // Sat: 0, Sun: 1, Mon: 2, etc.
-  const sat = new Date(npt.getTime() - diffToSat * 86400000);
-  return nptDate(sat);
-}
-
-function isDateSaturday(dateStr) {
-  if (!dateStr) return false;
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return false;
-  const dt = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
-  return dt.getUTCDay() === 6;
-}
 
 // Load Member Dashboard Data
 async function loadMember() {
   text('memberSymbol', profile?.symbolnum || 'Not assigned yet');
-  const today = nptDate();
+  const activeSat = getActiveSaturdayDate();
 
   const [lawResult, aggregateResult, attendanceResult, streakRpcResult] = await Promise.all([
     supabase.from('choir_personal_laws').select('personal_law').eq('user_id', user.id).limit(1),
     supabase.from('choir_attendance_aggregate').select('*').order('name'),
-    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled').eq('user_id', user.id).eq('datefilled', today).neq('attendance_status', 'manual').order('time_filled', { ascending: false }).limit(1),
+    supabase.from('choir_attendance_stack').select('attendance_status,attendance_on_time,time_filled,point').eq('user_id', user.id).eq('datefilled', activeSat).neq('attendance_status', 'manual').order('time_filled', { ascending: false }).limit(1),
     Promise.resolve(supabase.rpc('choir_get_member_streaks')).catch(err => { console.warn('Streak RPC notice:', err); return { data: null }; })
   ]);
 
@@ -1035,10 +1070,10 @@ async function loadMonthsList() {
   const csvSelect = $('csvMonthSelect');
   if (csvSelect) {
     const curVal = csvSelect.value;
-    csvSelect.innerHTML = monthList.map(m =>
+    csvSelect.innerHTML = '<option value="all">All Months</option>' + monthList.map(m =>
       `<option value="${escape(m.month_name)}"${m.is_active ? ' selected' : ''}>${escape(m.month_name)}</option>`
     ).join('');
-    if (curVal && monthList.some(m => m.month_name === curVal)) csvSelect.value = curVal;
+    if (curVal && (curVal === 'all' || monthList.some(m => m.month_name === curVal))) csvSelect.value = curVal;
   }
 
   const listRows = $('monthsListRows');
@@ -1066,7 +1101,9 @@ async function loadAdmin() {
   const today = nptDate();
   const npt = nptNow();
   if ((npt.getDay() === 6 && npt.getHours() >= 23) || npt.getDay() === 0) {
-    void Promise.resolve(supabase.rpc('choir_mark_missing_attendance')).catch(() => {});
+    try {
+      await supabase.rpc('choir_mark_missing_attendance');
+    } catch {}
   }
   const syncRequest = supabase.rpc('choir_sync_missing_symbols');
 
@@ -1633,13 +1670,17 @@ $('monthsListRows')?.addEventListener('click', async event => {
 
 // CSV Export by Selected Month
 $('csvExport')?.addEventListener('click', async () => {
-  const selectedMonth = $('csvMonthSelect')?.value || settings?.month_name;
+  const selectedMonth = $('csvMonthSelect')?.value || settings?.month_name || 'all';
+  const isAll = selectedMonth === 'all';
   try {
-    await withLoader('Preparing CSV', `Collecting attendance data for ${selectedMonth}`, async () => {
-      const { data, error } = await supabase.from('choir_attendance_stack')
+    await withLoader('Preparing CSV', `Collecting attendance data for ${isAll ? 'all months' : selectedMonth}`, async () => {
+      let query = supabase.from('choir_attendance_stack')
         .select('symbol,datefilled,month_name,name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status')
-        .eq('month_name', selectedMonth)
         .order('datefilled');
+      if (!isAll) {
+        query = query.eq('month_name', selectedMonth);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       const headers = ['Symbol', 'Datefilled', 'Month', 'Name', 'Reason', 'Time filled', 'Point', 'Holiday used', 'Attendance on time', 'Status'];
       const rows = (data || []).map(r => [
@@ -1649,7 +1690,7 @@ $('csvExport')?.addEventListener('click', async () => {
       const csv = [headers, ...rows].map(row => row.map(v => `"${String(v ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
       const link = document.createElement('a');
       link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-      link.download = `${selectedMonth}-choir-attendance.csv`;
+      link.download = `${isAll ? 'all-months' : selectedMonth}-choir-attendance.csv`;
       link.click();
       URL.revokeObjectURL(link.href);
     });
