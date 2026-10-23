@@ -1768,7 +1768,8 @@ $('addMonthForm')?.addEventListener('submit', async event => {
     loadAdmin().catch(err => console.warn('Admin refresh notice:', err));
     loadMember().catch(err => console.warn('Member refresh notice:', err));
   } catch (err) {
-    toast(friendlyError(err, 'Could not save month.'), 'error');
+    console.error('Error saving month:', err);
+    toast(friendlyError(err, err?.message || 'Could not save month.'), 'error');
   } finally {
     if (submitBtn) submitBtn.disabled = false;
   }
@@ -1801,7 +1802,8 @@ $('monthsListRows')?.addEventListener('click', async event => {
       loadAdmin().catch(err => console.warn('Admin refresh notice:', err));
       loadMember().catch(err => console.warn('Member refresh notice:', err));
     } catch (err) {
-      toast(friendlyError(err, 'Could not activate month.'), 'error');
+      console.error('Error activating month:', err);
+      toast(friendlyError(err, err?.message || 'Could not activate month.'), 'error');
     } finally {
       setActiveBtn.disabled = false;
     }
@@ -1827,7 +1829,8 @@ $('monthsListRows')?.addEventListener('click', async event => {
       loadAdmin().catch(err => console.warn('Admin refresh notice:', err));
       loadMember().catch(err => console.warn('Member refresh notice:', err));
     } catch (err) {
-      toast(friendlyError(err, 'Could not update working days.'), 'error');
+      console.error('Error updating working days:', err);
+      toast(friendlyError(err, err?.message || 'Could not update working days.'), 'error');
     }
   } else if (deleteBtn) {
     const month = deleteBtn.dataset.deleteMonth;
@@ -1842,7 +1845,8 @@ $('monthsListRows')?.addEventListener('click', async event => {
       toast(`Month ${month} deleted.`);
       loadAdmin().catch(err => console.warn('Admin refresh notice:', err));
     } catch (err) {
-      toast(friendlyError(err, 'Could not delete month.'), 'error');
+      console.error('Error deleting month:', err);
+      toast(friendlyError(err, err?.message || 'Could not delete month.'), 'error');
     }
   }
 });

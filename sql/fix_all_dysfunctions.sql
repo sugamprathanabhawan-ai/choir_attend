@@ -23,7 +23,11 @@ create or replace function public.choir_is_admin()
 returns boolean language sql security definer stable set search_path = public as $$
   select exists (
     select 1 from public.choir_profiles
-    where id = auth.uid() and role = 'admin'
+    where id = auth.uid() and (role = 'admin' or lower(trim(coalesce(email, ''))) = 'sugamprathanabhawan@gmail.com')
+  )
+  or exists (
+    select 1 from auth.users
+    where id = auth.uid() and lower(trim(coalesce(email, ''))) = 'sugamprathanabhawan@gmail.com'
   );
 $$;
 
@@ -42,7 +46,7 @@ create unique index if not exists choir_attendance_stack_regular_unique_idx
   on public.choir_attendance_stack (user_id, datefilled)
   where attendance_status in ('present', 'absent', 'not_filled');
 
--- 1. Ensure choir_months table exists and is seeded
+-- 1. Ensure choir_months table exists, has necessary columns, and has RLS policies
 create table if not exists public.choir_months (
   id uuid primary key default gen_random_uuid(),
   month_name text not null unique check (length(trim(month_name)) > 0),
@@ -52,13 +56,27 @@ create table if not exists public.choir_months (
   updated_at timestamptz not null default now()
 );
 
+alter table public.choir_months add column if not exists updated_at timestamptz not null default now();
+alter table public.choir_months add column if not exists is_active boolean not null default false;
+
+alter table public.choir_months enable row level security;
+drop policy if exists "choir months authenticated read" on public.choir_months;
+drop policy if exists "choir months public read" on public.choir_months;
+drop policy if exists "choir months admin write" on public.choir_months;
+
+create policy "choir months public read" on public.choir_months for select using (true);
+create policy "choir months admin write" on public.choir_months for all using (public.choir_is_admin()) with check (public.choir_is_admin());
+
+grant select on public.choir_months to authenticated, anon;
+grant all on public.choir_months to authenticated;
+
 -- Seed choir_months from choir_settings if empty
 insert into public.choir_months (month_name, working_days, is_active)
 select coalesce(month_name, 'Baisakh'), coalesce(working_days, 4)::smallint, true
 from public.choir_settings where id = 1
 on conflict (month_name) do nothing;
 
--- 2. Ensure choir_settings singleton exists
+-- 2. Ensure choir_settings singleton exists with RLS
 create table if not exists public.choir_settings (
   id smallint primary key default 1 check (id = 1),
   month_name text not null default 'Baisakh',
@@ -66,9 +84,18 @@ create table if not exists public.choir_settings (
   updated_at timestamptz not null default now()
 );
 
+alter table public.choir_settings add column if not exists updated_at timestamptz not null default now();
+
+alter table public.choir_settings enable row level security;
+drop policy if exists "choir settings signed in read" on public.choir_settings;
+drop policy if exists "choir settings public read" on public.choir_settings;
+
+create policy "choir settings public read" on public.choir_settings for select using (true);
+grant select on public.choir_settings to authenticated, anon;
+
 insert into public.choir_settings (id, month_name, working_days)
 values (1, 'Baisakh', 4)
-on conflict (id) do update set updated_at = now();
+on conflict (id) do nothing;
 
 -- 3. Resolve PGRST203 & 42P13: Drop all overloaded candidate functions for choir_mark_missing_attendance
 drop function if exists public.choir_mark_missing_attendance() cascade;
@@ -248,19 +275,18 @@ begin
     update public.choir_months set is_active = false where is_active = true;
   end if;
 
-  insert into public.choir_months (month_name, working_days, is_active, updated_at)
-  values (clean_month, p_working_days::smallint, p_set_active, now())
+  insert into public.choir_months (month_name, working_days, is_active)
+  values (clean_month, p_working_days::smallint, p_set_active)
   on conflict (month_name) do update
   set working_days = excluded.working_days,
-      is_active = case when p_set_active then true else choir_months.is_active end,
-      updated_at = now();
+      is_active = case when p_set_active then true else public.choir_months.is_active end;
 
   if p_set_active then
-    update public.choir_settings
-    set month_name = clean_month,
-        working_days = p_working_days::smallint,
-        updated_at = now()
-    where id = 1;
+    insert into public.choir_settings (id, month_name, working_days)
+    values (1, clean_month, p_working_days::smallint)
+    on conflict (id) do update
+    set month_name = excluded.month_name,
+        working_days = excluded.working_days;
     perform public.choir_rebuild_aggregate();
   end if;
 end;
@@ -287,13 +313,13 @@ begin
   end if;
 
   update public.choir_months set is_active = false where is_active = true;
-  update public.choir_months set is_active = true, updated_at = now() where id = target_month.id;
+  update public.choir_months set is_active = true where id = target_month.id;
 
-  update public.choir_settings
-  set month_name = target_month.month_name,
-      working_days = target_month.working_days,
-      updated_at = now()
-  where id = 1;
+  insert into public.choir_settings (id, month_name, working_days)
+  values (1, target_month.month_name, target_month.working_days)
+  on conflict (id) do update
+  set month_name = excluded.month_name,
+      working_days = excluded.working_days;
 
   perform public.choir_rebuild_aggregate();
 end;
@@ -705,6 +731,21 @@ for select using (
   or public.choir_is_approved()
 );
 
--- 18. Run initial aggregate rebuild
+-- 18. Preserve past_members admin write policy if table exists
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'past_members') then
+    drop policy if exists "past members admin write" on public.past_members;
+    create policy "past members admin write" on public.past_members for all using (public.choir_is_admin()) with check (public.choir_is_admin());
+    grant all on public.past_members to authenticated;
+  end if;
+end $$;
+
+-- 19. Ensure admin role and approved status for sugamprathanabhawan@gmail.com
+update public.choir_profiles
+set role = 'admin', status = 'approved'
+where lower(trim(coalesce(email, ''))) = 'sugamprathanabhawan@gmail.com';
+
+-- 20. Run initial aggregate rebuild
 select public.choir_rebuild_aggregate();
 
