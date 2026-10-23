@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sugam Prathana Bhawan Choir Attendance & Member Portal">
+  <title>Sugam Choir Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: '#000000',
+            brand: '#0f52ba',
+            gold: '#87ceeb'
+          },
+          fontFamily: {
+            sans: ['Poppins', 'sans-serif'],
+            serif: ['Playfair Display', 'serif']
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="min-h-screen bg-sky-50/70 font-sans text-black antialiased selection:bg-blue-600 selection:text-white">
+  <!-- Toast Notification Pill -->
+  <div id="toast" class="fixed right-5 top-5 z-50 hidden max-w-sm rounded-2xl px-5 py-3.5 text-sm font-bold text-white shadow-2xl transition-all duration-300"></div>
+
+  <!-- Global App Loader -->
+  <div id="appLoader" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-900/40 p-5 backdrop-blur-md" role="status" aria-live="polite" aria-busy="true">
+    <div class="w-full max-w-xs rounded-3xl border border-white/60 bg-white p-6 text-center shadow-2xl">
+      <div class="loader-ring mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-blue-600">
+        <i class="fa-solid fa-heart animate-pulse"></i>
+      </div>
+      <p id="appLoaderTitle" class="mt-4 text-base font-black text-black">Please wait</p>
+      <p id="appLoaderMessage" class="mt-1 text-xs font-semibold text-black/70">Preparing your choir portal</p>
+    </div>
+  </div>
+
+  <!-- Auth View (Login / Sign Up) -->
+  <main id="authView" class="relative mx-auto flex min-h-screen max-w-5xl items-center p-4 sm:p-6 lg:p-8">
+    <!-- Church Home Quick Navigation -->
+    <a href="https://sugamchurch.vercel.app/" class="absolute left-6 top-6 z-20 inline-flex items-center gap-2 rounded-full border border-white/30 bg-slate-950/80 px-4 py-2 text-xs font-bold text-white shadow-lg backdrop-blur-md transition hover:bg-black hover:scale-105">
+      <i class="fa-solid fa-arrow-left"></i>
+      <span>Church Home</span>
+    </a>
+
+    <div class="grid w-full overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-2xl md:grid-cols-5">
+      <!-- Showcase Banner -->
+      <section class="auth-showcase relative overflow-hidden bg-gradient-to-br from-[#082a61] via-[#0f5bbb] to-[#1aa8dc] p-8 text-white md:col-span-2 md:p-12">
+        <div class="brand-mark">
+          <i class="fa-solid fa-music"></i>
+        </div>
+        <p class="mt-7 text-xs font-black uppercase tracking-[.28em] text-gold">Sugam Prathana Bhawan</p>
+        <h1 class="mt-4 text-3xl font-black leading-tight sm:text-4xl">Choir life,<br><span class="text-gold">in harmony.</span></h1>
+        <p class="mt-5 text-sm font-medium text-slate-100 leading-relaxed">A bright, simple home for choir attendance, personal guidance, and the active choir board.</p>
+        
+        <div class="mt-8 grid grid-cols-2 gap-3 text-xs sm:text-sm">
+          <div class="feature-chip">
+            <i class="fa-solid fa-calendar-check"></i>
+            <span>Easy attendance</span>
+          </div>
+          <div class="feature-chip">
+            <i class="fa-solid fa-heart"></i>
+            <span>Made for choir</span>
+          </div>
+        </div>
+
+        <div class="mt-8 rounded-2xl border border-white/20 bg-white/10 p-4 text-xs leading-relaxed text-slate-100 backdrop-blur-md">
+          <b class="text-white">Before continuing:</b> please read the <a href="https://sugamchurch.vercel.app/law/SUGAM%20CHOIR%20LAWS.pdf" target="_blank" rel="noopener noreferrer" class="font-bold text-gold underline hover:text-white transition-colors">Sugam Choir laws (PDF)</a> and accept them only if you agree.
+        </div>
+      </section>
+
+      <!-- Auth Form Container -->
+      <section class="p-6 sm:p-8 md:col-span-3 md:p-10">
+        <!-- Tab Selector -->
+        <div class="mb-6 flex rounded-2xl bg-slate-100 p-1.5 border border-slate-200/70">
+          <button data-auth-tab="login" class="auth-tab flex-1 rounded-xl py-2.5 text-sm font-black transition-all">Login</button>
+          <button data-auth-tab="signup" class="auth-tab flex-1 rounded-xl py-2.5 text-sm font-black transition-all">Sign up</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="loginForm" class="auth-form space-y-4">
+          <div>
+            <label class="label">Email address</label>
+            <input id="loginEmail" type="email" autocomplete="email" required placeholder="name@example.com" class="input">
+          </div>
+          <div>
+            <div class="flex items-center justify-between">
+              <label class="label">Symbol number</label>
+              <button type="button" id="toggleLoginPassword" class="text-xs font-bold text-blue-600 hover:text-blue-800">Show</button>
+            </div>
+            <input id="loginSymbol" type="password" autocomplete="current-password" required placeholder="Enter your symbol number" class="input">
+            <p class="mt-1.5 text-xs font-semibold text-black/70">Use the symbol number you registered with during sign-up.</p>
+          </div>
+          <button class="primary-btn w-full mt-2" type="submit">Log in to Portal</button>
+        </form>
+
+        <!-- Signup Form -->
+        <form id="signupForm" class="auth-form hidden space-y-4">
+          <div>
+            <label class="label">Full name <span class="text-red-600">*</span></label>
+            <input id="signupName" required placeholder="Enter your full name" class="input">
+          </div>
+          <div>
+            <label class="label">Nepali phone number <span class="text-red-600">*</span></label>
+            <input id="signupPhone" inputmode="numeric" pattern="9[0-9]{9}" placeholder="98XXXXXXXX" required class="input">
+          </div>
+          <div>
+            <label class="label">Email address <span class="text-red-600">*</span></label>
+            <input id="signupEmail" type="email" required placeholder="name@example.com" class="input">
+          </div>
+          <div>
+            <div class="flex items-center justify-between">
+              <label class="label">Choose a unique symbol <span class="text-red-600">*</span></label>
+              <button type="button" id="toggleSignupPassword" class="text-xs font-bold text-blue-600 hover:text-blue-800">Show</button>
+            </div>
+            <input id="signupSymbol" type="password" autocomplete="new-password" minlength="6" required placeholder="e.g. CHOIR101 (min 6 characters)" class="input">
+            <p class="mt-1 text-xs font-semibold text-black/70">This symbol acts as your login credential and cannot be shared.</p>
+          </div>
+          <div>
+            <label class="label">Profile picture (Selfie) <span class="text-red-600">*</span></label>
+            <input id="signupSelfie" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif" required class="block w-full text-xs sm:text-sm font-semibold text-black file:mr-3 file:rounded-xl file:border-0 file:bg-blue-50 file:px-3.5 file:py-2 file:text-xs file:font-bold file:text-blue-700 hover:file:bg-blue-100 transition">
+            <p class="mt-1 text-xs font-semibold text-black/70">JPG, PNG, or HEIC format. Automatically compressed safely under 10 KB.</p>
+          </div>
+          <label class="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3.5 text-xs sm:text-sm font-bold text-black">
+            <input id="acceptLaws" type="checkbox" required class="mt-1 h-4 w-4 rounded accent-blue-600">
+            <span>I accept the laws of the church and choir board specified in the choir laws document.</span>
+          </label>
+          <button class="primary-btn w-full mt-2" type="submit">Create account</button>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <!-- Main Authenticated App View -->
+  <main id="appView" class="hidden min-h-screen">
+    <!-- Top Sticky Navbar -->
+    <nav class="sticky top-0 z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-xl shadow-sm">
+      <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div class="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <div class="nav-mark shrink-0">
+            <i class="fa-solid fa-music"></i>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-black tracking-wide text-black">SUGAM <span class="text-blue-600 font-extrabold">CHOIR</span></p>
+            <p id="navEmail" class="max-w-28 truncate text-xs font-bold text-black/70 sm:max-w-none"></p>
+          </div>
+        </div>
+
+        <div id="navActions" class="flex shrink-0 items-center gap-2 sm:gap-3">
+          <a href="https://sugamchurch.vercel.app/" class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-3.5 py-1.5 text-xs font-bold text-black transition hover:bg-slate-200">
+            <i class="fa-solid fa-church text-blue-600"></i>
+            <span class="hidden sm:inline">Church Home</span>
+          </a>
+          <img id="navSelfie" class="h-9 w-9 sm:h-10 sm:w-10 rounded-2xl border border-slate-200 bg-slate-100 object-cover shadow-sm" alt="Your selfie">
+          <span id="navName" class="hidden text-sm font-extrabold text-black sm:inline"></span>
+          <button id="logoutBtn" class="logout-btn" type="button">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span class="hidden sm:inline">Log out</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content Container -->
+    <div class="mx-auto max-w-7xl p-4 sm:p-6 md:p-8 space-y-6">
+      <!-- Pending Approval Notice -->
+      <section id="pendingPanel" class="hidden rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+        <div class="flex items-center gap-3">
+          <i class="fa-solid fa-hourglass-half text-amber-600 text-xl"></i>
+          <div>
+            <p class="font-black text-black">Thank you for registering!</p>
+            <p class="mt-0.5 text-sm font-medium text-black">Your account is awaiting administrator approval. You can sign in to view guidelines, but Saturday attendance will open once approved.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Lay Member Panel -->
+      <section id="memberPanel" class="space-y-6">
+        <!-- Hero Clock & Personal Law Section -->
+        <div class="grid gap-6 lg:grid-cols-3">
+          <div class="hero-time rounded-3xl bg-gradient-to-br from-[#0b3474] to-[#1268c9] p-6 text-white shadow-xl lg:col-span-1">
+            <div class="flex items-center justify-between">
+              <p class="text-xs font-black uppercase tracking-widest text-slate-200">Live Nepal time</p>
+              <i class="fa-regular fa-clock text-gold text-lg"></i>
+            </div>
+            <p id="nepalClock" class="mt-3 text-3xl sm:text-4xl font-black font-mono tracking-tight">--:--:--</p>
+            <p id="monthLabel" class="mt-4 text-xs sm:text-sm font-bold text-slate-100"></p>
+          </div>
+
+          <div id="personalLawCard" class="hidden rounded-3xl border border-indigo-200 bg-indigo-50/90 p-6 shadow-sm lg:col-span-2">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-scroll text-indigo-600"></i>
+              <p class="text-xs font-black uppercase tracking-widest text-indigo-900">Personal Law / Guidance</p>
+            </div>
+            <p id="personalLaw" class="mt-3 whitespace-pre-line text-sm sm:text-base font-semibold text-black leading-relaxed"></p>
+          </div>
+        </div>
+
+        <!-- Profile Picture Update Card -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-black text-black">Profile Picture</h2>
+              <p class="mt-1 text-xs sm:text-sm font-semibold text-black/70">Upload a new photo from your gallery or take a new one to update your profile.</p>
+            </div>
+            <label class="secondary-btn inline-flex cursor-pointer items-center justify-center gap-2 self-start sm:self-auto">
+              <i class="fa-solid fa-camera text-blue-600"></i>
+              <span>Update photo</span>
+              <input id="profilePictureInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif">
+            </label>
+          </div>
+        </section>
+
+        <!-- Interactive Attendance Rules Slider -->
+        <section id="rulesSliderSection" class="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-3">
+              <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 text-lg shadow-sm">
+                <i class="fa-solid fa-book-open"></i>
+              </div>
+              <div>
+                <h2 class="text-xl font-black text-black">Choir Attendance Guide</h2>
+                <p class="text-xs font-bold text-black/70">Swipe or click through to easily understand all attendance rules & rewards</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 self-end sm:self-auto">
+              <button id="sliderPrevBtn" type="button" aria-label="Previous rule" class="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-black transition hover:bg-slate-200 hover:scale-105 active:scale-95">
+                <i class="fa-solid fa-chevron-left text-xs"></i>
+              </button>
+              <span id="sliderCounter" class="text-xs font-black text-black px-1">1 / 6</span>
+              <button id="sliderNextBtn" type="button" aria-label="Next rule" class="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-black transition hover:bg-slate-200 hover:scale-105 active:scale-95">
+                <i class="fa-solid fa-chevron-right text-xs"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/50">
+            <div id="rulesSliderTrack" class="flex w-full" style="display: flex; width: 100%; transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1); will-change: transform;">
+              <!-- Slide 1: Operating Window -->
+              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-blue-50/90 via-white to-sky-50/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30 text-2xl">
+                    <i class="fa-solid fa-calendar-check"></i>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-blue-900">Rule 1 • Saturdays</span>
+                      <span class="text-xs font-black text-black">3:00 AM – 11:00 PM</span>
+                    </div>
+                    <h3 class="mt-1 text-lg font-black text-black">When is attendance open?</h3>
+                    <p class="mt-1 text-sm text-black font-medium leading-relaxed">
+                      Attendance opens <b>every Saturday from 3:00 AM to 11:00 PM Nepal Time</b>. Choose <b>Present</b> or <b>Absent</b> directly from your phone.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <!-- Slide 2: 9:50 AM Deadline & Streak -->
+              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-amber-50/90 via-white to-orange-50/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-lg shadow-amber-500/30 text-2xl">
+                    <i class="fa-solid fa-fire"></i>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-amber-900">Rule 2 • On-Time & Present Streak</span>
+                      <span class="text-xs font-black text-black">9:50 AM Cutoff</span>
+                    </div>
+                    <h3 class="mt-1 text-lg font-black text-black">On-Time Cutoff & Present Streak</h3>
+                    <p class="mt-1 text-sm text-black font-medium leading-relaxed">
+                      Submit before or at <b>9:50 AM</b> to earn an <b>On-Time point</b> for the month. Your <b>Streak</b> tracks the <b>total Saturdays you have been present till date</b> across all your choir history.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <!-- Slide 3: 1 Free Monthly Holiday -->
+              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-emerald-50/90 via-white to-teal-50/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 text-2xl">
+                    <i class="fa-solid fa-gift"></i>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-emerald-900">Rule 3 • Free Holiday</span>
+                      <span class="text-xs font-black text-black">0 Points</span>
+                    </div>
+                    <h3 class="mt-1 text-lg font-black text-black">1 Free Holiday each month</h3>
+                    <p class="mt-1 text-sm text-black font-medium leading-relaxed">
+                      Every month, your <b>first absent or late submission costs 0 penalty points</b>! It simply uses your 1 monthly allowed holiday so you are never penalized for occasional emergencies.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <!-- Slide 4: Penalty Points & Fines -->
+              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-rose-50/90 via-white to-pink-50/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-lg shadow-rose-600/30 text-2xl">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-md bg-rose-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-rose-900">Rule 4 • Penalty Points</span>
+                      <span class="text-xs font-black text-black">+1 Point each</span>
+                    </div>
+                    <h3 class="mt-1 text-lg font-black text-black">Watch out for penalty points!</h3>
+                    <p class="mt-1 text-sm text-black font-medium leading-relaxed">
+                      If you've already used your free holiday for the month, any subsequent late or absent attendance adds <b>+1 penalty point</b>. Accumulating <b>10 points</b> leads to an official choir <b>Fine</b>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <!-- Slide 5: -1 Point Bonus -->
+              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-purple-50/90 via-white to-violet-50/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-purple-600 text-white shadow-lg shadow-purple-600/30 text-2xl">
+                    <i class="fa-solid fa-award"></i>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-md bg-purple-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-purple-900">Rule 5 • Reward Bonus</span>
+                      <span class="text-xs font-black text-black">-1 Point applied</span>
+                    </div>
+                    <h3 class="mt-1 text-lg font-black text-black">Earn a -1 Point bonus reward!</h3>
+                    <p class="mt-1 text-sm text-black font-medium leading-relaxed">
+                      When your on-time attendance meets all working Saturdays in a month (e.g. 4 on-time in a 4-Saturday month), you qualify for a <b>-1 point deduction</b> validated by the choir administrator!
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <!-- Slide 6: Auto-Marking -->
+              <div class="w-full shrink-0 p-5 sm:p-7 bg-gradient-to-br from-indigo-50/90 via-white to-slate-50/70" style="min-width: 100%; width: 100%; flex-shrink: 0; box-sizing: border-box;">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 text-2xl">
+                    <i class="fa-solid fa-moon"></i>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-indigo-900">Rule 6 • Saturday 11:00 PM</span>
+                      <span class="text-xs font-black text-black">Auto-assigned</span>
+                    </div>
+                    <h3 class="mt-1 text-lg font-black text-black">Forgot to fill the form?</h3>
+                    <p class="mt-1 text-sm text-black font-medium leading-relaxed">
+                      At <b>11:00 PM Saturday</b>, missing forms are automatically recorded on the rule basis. If you still have your free holiday, it uses it (0 pts); if already used, it adds 1 point. Always submit during the day!
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Dots Indicator -->
+          <div id="sliderDots" class="mt-4 flex items-center justify-center gap-1.5"></div>
+        </section>
+
+        <!-- Saturday Attendance Submission Card -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="mb-5 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 class="text-2xl font-black text-black">Saturday Attendance</h2>
+              <p class="text-xs sm:text-sm font-semibold text-black/70">Opens every Saturday from 3:00 AM to 11:00 PM Nepal time.</p>
+            </div>
+            <span id="attendanceState" class="rounded-full border border-slate-200 bg-slate-100 px-3.5 py-1 text-xs font-black text-black"></span>
+          </div>
+
+          <form id="attendanceForm" class="grid gap-5 md:grid-cols-2">
+            <div>
+              <p class="label">Your symbol number</p>
+              <p id="memberSymbol" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-extrabold text-black">Not assigned yet</p>
+              <p class="mt-1.5 text-xs font-semibold text-black/70">This is linked to your authenticated account.</p>
+            </div>
+            <div>
+              <label class="label">Attendance Status</label>
+              <div class="flex gap-3">
+                <button data-status="present" type="button" class="status-btn flex-1 rounded-2xl border-2 p-3 font-black">Present</button>
+                <button data-status="absent" type="button" class="status-btn flex-1 rounded-2xl border-2 p-3 font-black">Absent</button>
+              </div>
+            </div>
+            <div id="reasonWrap" class="hidden md:col-span-2">
+              <label class="label">Why are you absent? <span class="text-red-600">*</span></label>
+              <textarea id="reasonInput" class="input min-h-24" placeholder="Please enter a valid reason for absence"></textarea>
+            </div>
+            <button id="attendanceSubmit" class="primary-btn md:col-span-2" type="submit">Submit Attendance</button>
+            <div id="attendanceResult" class="hidden rounded-2xl border p-4 md:col-span-2" role="status" aria-live="polite">
+              <p id="attendanceResultTitle" class="font-black"></p>
+              <p id="attendanceResultDetail" class="mt-1 text-sm font-semibold"></p>
+              <button id="retryAttendance" type="button" class="secondary-btn mt-3 hidden">Retry attendance</button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Statistics Table Card -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <h2 class="text-2xl font-black text-black">Statistics</h2>
+          <p id="statsCaption" class="mt-1 text-xs sm:text-sm font-semibold text-black"></p>
+          <div class="mt-5 overflow-x-auto rounded-2xl border border-slate-200 shadow-sm">
+            <table class="w-full text-left text-sm">
+              <thead class="border-b-2 border-slate-200 bg-slate-100/80 text-xs uppercase font-extrabold text-black">
+                <tr>
+                  <th class="p-3.5">Name</th>
+                  <th class="p-3.5">Total points</th>
+                  <th class="p-3.5">Holiday used</th>
+                  <th class="p-3.5">Ontime</th>
+                  <th class="p-3.5">Streak (Present)</th>
+                  <th class="p-3.5">Status</th>
+                </tr>
+              </thead>
+              <tbody id="memberStats" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- Administrator Panel -->
+      <section id="adminPanel" class="hidden space-y-6">
+        <div class="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4">
+          <div>
+            <p class="text-xs font-black uppercase tracking-widest text-blue-700">Administrator</p>
+            <h1 class="text-3xl font-black text-black">Choir Board</h1>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="markMissingBtn" type="button" class="secondary-btn">
+              <i class="fa-solid fa-user-clock text-amber-600"></i>
+              <span>Mark missing</span>
+            </button>
+            <button id="syncDataBtn" type="button" class="secondary-btn">
+              <i class="fa-solid fa-arrows-rotate text-blue-600"></i>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Extra Table Part 1: Monthly Perfect On-Time Review (Bonus -1 Action Table) -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div class="flex items-center gap-3">
+                <h2 class="text-xl font-black text-black">Monthly Perfect On-Time Review</h2>
+                <span id="bonusQualCount" class="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-black text-blue-900 border border-blue-200">0 qualifying</span>
+              </div>
+              <p id="bonusReviewCaption" class="mt-1 text-xs sm:text-sm font-semibold text-black">Members who reached working Saturdays on-time. Click Valid to award -1 point, or Exclude to remove.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <label for="bonusMonthSelect" class="text-xs font-black uppercase text-black">Month:</label>
+              <select id="bonusMonthSelect" class="input w-auto py-1.5 px-3 text-sm font-bold"></select>
+              <button id="refreshBonusBtn" type="button" class="secondary-btn py-1.5 px-3 text-xs" title="Refresh qualifying members">
+                <i class="fa-solid fa-arrows-rotate"></i>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap mt-4">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Symbol</th>
+                  <th>Month</th>
+                  <th>On-time</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="bonusReviewRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Extra Table Part 2: Saturday Attendance Pending & Assign -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div class="flex items-center gap-3">
+                <h2 class="text-xl font-black text-black">Saturday Attendance Pending</h2>
+                <span id="unsubmittedCount" class="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-black text-amber-900 border border-amber-200">0 pending</span>
+              </div>
+              <p id="unsubmittedCaption" class="mt-1 text-xs sm:text-sm font-semibold text-black">Approved members who have not yet submitted attendance for Saturday.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <label for="saturdayDateSelect" class="text-xs font-black uppercase text-black">Date:</label>
+              <input id="saturdayDateSelect" type="date" class="input w-auto py-1.5 px-3 text-sm">
+              <button id="assignAllPendingBtn" type="button" class="primary-btn py-1.5 px-3.5 text-xs whitespace-nowrap shadow-sm">
+                <i class="fa-solid fa-user-check mr-1"></i> Assign All Missing
+              </button>
+              <button id="refreshUnsubmittedBtn" type="button" class="secondary-btn py-1.5 px-3 text-xs" title="Refresh attendance status">
+                <i class="fa-solid fa-arrows-rotate"></i>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap mt-4">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Symbol</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="unsubmittedRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Admin Statistics Table with Month Filter -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-xl font-black text-black">Member Statistics (Monthly & Historical)</h2>
+              <p id="adminStatsCaption" class="mt-1 text-xs sm:text-sm font-semibold text-black">Filter statistics by any configured month or view all-time cumulative scores.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <label for="adminStatsMonthFilter" class="text-xs font-black uppercase text-black">Filter by Month:</label>
+              <select id="adminStatsMonthFilter" class="input w-auto py-1.5 px-3 text-sm font-bold">
+                <option value="all">All-Time Cumulative</option>
+              </select>
+              <button id="refreshAdminStatsBtn" type="button" class="secondary-btn py-1.5 px-3 text-xs" title="Refresh stats">
+                <i class="fa-solid fa-arrows-rotate"></i>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap mt-4">
+            <table>
+              <thead id="adminStatsHead">
+                <tr>
+                  <th>Name</th>
+                  <th>Total points</th>
+                  <th>Holiday used</th>
+                  <th>Ontime</th>
+                  <th>Streak (Present)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="adminStatsRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Member Detail Card -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 class="text-xl font-black text-black">Member Detail</h2>
+              <p class="mt-1 text-xs sm:text-sm font-semibold text-black">Choose a member to inspect every attendance record, manual point, and holiday used.</p>
+            </div>
+            <div class="flex w-full gap-2 sm:w-auto">
+              <label class="sr-only" for="memberDetailSelect">Member</label>
+              <select id="memberDetailSelect" class="input min-w-0 sm:w-64" aria-label="Choose a member"></select>
+              <button id="memberDetailBtn" type="button" class="primary-btn whitespace-nowrap">Details</button>
+            </div>
+          </div>
+          <div id="memberDetailResult" class="mt-5" aria-live="polite">
+            <p class="text-sm font-bold text-black/70">Choose a member and select Details.</p>
+          </div>
+        </section>
+
+        <!-- New Member Requests -->
+        <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <h2 class="text-xl font-black text-black">New Member Requests</h2>
+          <p class="mt-1 text-xs sm:text-sm font-semibold text-black">Member approval confirms their submitted symbol number.</p>
+          <div class="table-wrap mt-4">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Symbol number</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="pendingRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Personal Law & Working Month Settings Grid -->
+        <div class="grid gap-6 lg:grid-cols-2">
+          <!-- Personal Law Form -->
+          <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <h2 class="text-xl font-black text-black">Personal Law / Guidance</h2>
+            <form id="lawForm" class="mt-4 space-y-3">
+              <input id="lawSymbol" class="input" placeholder="Member symbol number" required>
+              <textarea id="lawText" class="input min-h-28" placeholder="Enter personal law or pastoral guidance for this member" required></textarea>
+              <button class="primary-btn" type="submit">Save personal law</button>
+            </form>
+          </section>
+
+          <!-- Working Months Management (N Months) & CSV Export -->
+          <section class="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
+            <div>
+              <h2 class="text-xl font-black text-black">Working Months (N Months)</h2>
+              <p class="mt-1 text-xs sm:text-sm font-semibold text-black">Add any N number of months with working Saturdays and toggle the active month.</p>
+            </div>
+
+            <!-- Add / Update Month Form -->
+            <form id="addMonthForm" class="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label class="label">Month Name</label>
+                  <input id="newMonthName" class="input py-2 text-sm" placeholder="e.g. Baisakh" required>
+                </div>
+                <div>
+                  <label class="label">Working Saturdays (1–6)</label>
+                  <input id="newMonthDays" type="number" min="1" max="6" class="input py-2 text-sm" placeholder="e.g. 4" required>
+                </div>
+              </div>
+              <div class="flex items-center justify-between pt-1">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                  <input id="newMonthActive" type="checkbox" class="h-4 w-4 rounded accent-blue-600">
+                  <span class="text-xs font-bold text-black">Set as Active Month</span>
+                </label>
+                <button class="primary-btn py-1.5 px-4 text-xs font-black shadow-sm" type="submit">
+                  <i class="fa-solid fa-plus mr-1"></i> Save Month
+                </button>
+              </div>
+            </form>
+
+            <!-- Configured Months Table -->
+            <div class="table-wrap max-h-48">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Month Name</th>
+                    <th>Working Days</th>
+                    <th>Active</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="monthsListRows"></tbody>
+              </table>
+            </div>
+
+            <!-- CSV Export by Month -->
+            <div class="border-t border-slate-200 pt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p class="text-xs font-bold text-black">Export Records to CSV</p>
+                <p class="text-xs font-semibold text-black/70">Downloads attendance records for selected month.</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <select id="csvMonthSelect" class="input w-auto py-1.5 px-3 text-xs font-bold"></select>
+                <button id="csvExport" class="secondary-btn py-1.5 px-3 text-xs font-black" type="button">
+                  <i class="fa-solid fa-file-arrow-down text-emerald-600 mr-1"></i>
+                  <span>Download CSV</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Sugam Choir Laws Footer Section -->
+  <section id="laws" class="mx-auto max-w-5xl px-6 pb-12 pt-4 text-center text-sm font-semibold text-black">
+    <h2 class="text-xl font-black text-black">Sugam Choir Laws</h2>
+    <p class="mt-2 text-black font-medium">All members must read and accept the <a href="https://sugamchurch.vercel.app/law/SUGAM%20CHOIR%20LAWS.pdf" target="_blank" rel="noopener noreferrer" class="font-extrabold text-blue-700 underline hover:text-black transition">Sugam Choir laws PDF</a> before creating an account.</p>
+  </section>
+
+  <!-- Scripts -->
+  <script src="./js/config.js"></script>
+  <script type="module" src="./js/app.js?v=20260913-features-v3"></script>
+
+  <!-- Butter Smooth Light Mode Styling -->
+  <style>
+    :root {
+      --ink: #000000;
+      --paper: #f8fafc;
+    }
+
+    * {
+      scrollbar-color: #94a3b8 transparent;
+      scrollbar-width: thin;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      background: radial-gradient(circle at 10% 8%, #e0f2fe 0, transparent 25rem),
+                  radial-gradient(circle at 90% 12%, #fce7f3 0, transparent 26rem),
+                  linear-gradient(135deg, #f8fafc 0%, #f1f5f9 50%, #fafafa 100%);
+      min-height: 100vh;
+      color: #000000 !important;
+    }
+
+    /* Headings */
+    h1, h2, h3, h4, h5, h6 {
+      color: #000000 !important;
+      letter-spacing: -0.015em;
+    }
+    #appView h1, #appView h2 {
+      font-family: 'Playfair Display', serif;
+      color: #000000 !important;
+    }
+
+    /* All readable text & elements forced to pure black */
+    p:not(.auth-showcase *):not(.hero-time *):not(.primary-btn *):not(#toast *):not(.fine-badge *):not(.text-white *),
+    span:not(.auth-showcase *):not(.hero-time *):not(.primary-btn *):not(#toast *):not(.fine-badge *):not(.text-white *):not([class*="bg-emerald"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-blue"]):not([class*="bg-indigo"]):not([class*="bg-purple"]):not([class*="from-amber"]),
+    label:not(.primary-btn):not(.secondary-btn):not(.text-white),
+    b, strong, td, th {
+      color: #000000 !important;
+    }
+
+    /* Form Controls */
+    .input {
+      width: 100%;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 1rem;
+      padding: 0.75rem 1rem;
+      outline: none;
+      background: #ffffff;
+      color: #000000 !important;
+      font-weight: 600;
+      transition: border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .input:hover {
+      border-color: #94a3b8;
+    }
+    .input:focus {
+      border-color: #0f65ce;
+      box-shadow: 0 0 0 4px rgba(15, 101, 206, 0.15);
+      background: #ffffff;
+    }
+    .input::placeholder {
+      color: #64748b;
+      font-weight: 500;
+    }
+
+    .label {
+      display: block;
+      margin-bottom: 0.45rem;
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #000000 !important;
+    }
+
+    /* Buttons */
+    .primary-btn {
+      position: relative;
+      overflow: hidden;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      border-radius: 9999px;
+      background: linear-gradient(120deg, #0f4fc1 0%, #1684e8 50%, #06b6d4 100%);
+      padding: 0.85rem 1.4rem;
+      color: #ffffff !important;
+      font-weight: 800;
+      font-size: 0.875rem;
+      letter-spacing: 0.02em;
+      box-shadow: 0 10px 22px rgba(15, 79, 193, 0.28);
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .primary-btn:before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.4) 50%, transparent 70%);
+      transform: translateX(-120%);
+      transition: transform 0.5s ease;
+    }
+    .primary-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 28px rgba(15, 79, 193, 0.38);
+    }
+    .primary-btn:hover:before {
+      transform: translateX(120%);
+    }
+    .primary-btn:active {
+      transform: translateY(0);
+    }
+
+    .secondary-btn, .logout-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-radius: 9999px;
+      border: 1px solid #cbd5e1;
+      background: #f1f5f9;
+      padding: 0.65rem 1.15rem;
+      font-size: 0.875rem;
+      font-weight: 800;
+      color: #000000 !important;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .secondary-btn:hover, .logout-btn:hover {
+      background: #e2e8f0;
+      border-color: #94a3b8;
+      transform: translateY(-1px);
+    }
+
+    /* Attendance Present/Absent Buttons */
+    .status-btn {
+      border: 2px solid #cbd5e1 !important;
+      background: #ffffff;
+      color: #000000 !important;
+      font-weight: 800;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .status-btn:hover {
+      border-color: #64748b !important;
+      transform: translateY(-1.5px);
+    }
+    .status-btn.active {
+      border-color: #0f4fc1 !important;
+      background: linear-gradient(125deg, #0f4fc1, #1684e8) !important;
+      color: #ffffff !important;
+      box-shadow: 0 8px 18px rgba(15, 79, 193, 0.32);
+    }
+
+    /* Tables */
+    .table-wrap {
+      margin-top: 1rem;
+      overflow: auto;
+      max-height: 24rem;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 1.25rem;
+      background: #ffffff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+    }
+    .table-wrap table {
+      width: 100%;
+      font-size: 0.825rem;
+      border-collapse: collapse;
+    }
+    .table-wrap th, .table-wrap td {
+      padding: 0.85rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid #f1f5f9;
+      color: #000000 !important;
+    }
+    .table-wrap th {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #f8fafc;
+      font-size: 0.72rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .table-wrap tbody tr {
+      transition: background 0.15s ease;
+    }
+    .table-wrap tbody tr:hover {
+      background: #f8fafc;
+    }
+
+    /* Badges */
+    .fine-row {
+      background: #fff1f2 !important;
+    }
+    .fine-badge {
+      display: inline-block;
+      border-radius: 9999px;
+      background: linear-gradient(110deg, #e11d48, #f43f5e);
+      padding: 0.25rem 0.65rem;
+      color: #ffffff !important;
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      box-shadow: 0 2px 6px rgba(225, 29, 72, 0.25);
+    }
+
+    /* Auth Showcase */
+    .auth-showcase {
+      position: relative;
+      overflow: hidden;
+    }
+    .auth-showcase:before, .auth-showcase:after {
+      content: '';
+      position: absolute;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      pointer-events: none;
+    }
+    .auth-showcase:before {
+      width: 20rem;
+      height: 20rem;
+      right: -10rem;
+      top: -6rem;
+    }
+    .auth-showcase:after {
+      width: 15rem;
+      height: 15rem;
+      left: -7rem;
+      bottom: -7rem;
+    }
+    .auth-showcase > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .brand-mark, .nav-mark {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(140deg, #ffffff, #bae6fd);
+      color: #0369a1;
+      box-shadow: 0 10px 25px rgba(56, 189, 248, 0.3);
+    }
+    .brand-mark {
+      height: 3.5rem;
+      width: 3.5rem;
+      border-radius: 1.2rem;
+      font-size: 1.4rem;
+      transform: rotate(-6deg);
+    }
+    .nav-mark {
+      height: 2.5rem;
+      width: 2.5rem;
+      border-radius: 0.85rem;
+    }
+
+    .feature-chip {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 0.95rem;
+      padding: 0.75rem;
+      font-weight: 700;
+      backdrop-filter: blur(8px);
+      color: #ffffff !important;
+    }
+    .feature-chip i {
+      color: #bae6fd;
+    }
+
+    .auth-tab {
+      color: #000000 !important;
+    }
+    .auth-tab.bg-white {
+      background: #ffffff !important;
+      color: #000000 !important;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
+    }
+
+    /* Cards Glassmorphism */
+    #appView .rounded-3xl.bg-white {
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      background: rgba(255, 255, 255, 0.96) !important;
+      box-shadow: 0 6px 24px -3px rgba(15, 23, 42, 0.05);
+      backdrop-filter: blur(14px);
+    }
+
+    /* Hero Clock Card */
+    .hero-time {
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 15px 35px rgba(11, 52, 116, 0.25);
+    }
+    .hero-time:after {
+      content: '';
+      position: absolute;
+      width: 10rem;
+      height: 10rem;
+      right: -4rem;
+      bottom: -6rem;
+      border-radius: 999px;
+      background: rgba(103, 216, 255, 0.18);
+      pointer-events: none;
+    }
+    .hero-time > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Preserved White Text on Dark Cards & Elements */
+    .auth-showcase, .auth-showcase h1, .auth-showcase p, .auth-showcase span:not(.text-gold), .auth-showcase b {
+      color: #ffffff !important;
+    }
+    .auth-showcase .text-gold {
+      color: #87ceeb !important;
+    }
+    .hero-time, .hero-time p, .hero-time span {
+      color: #ffffff !important;
+    }
+    .hero-time .text-slate-200, .hero-time .text-slate-100 {
+      color: #e2e8f0 !important;
+    }
+    .hero-time .text-gold {
+      color: #87ceeb !important;
+    }
+    .primary-btn, .primary-btn * {
+      color: #ffffff !important;
+    }
+    .status-btn.active, .status-btn.active * {
+      color: #ffffff !important;
+    }
+    #toast, #toast * {
+      color: #ffffff !important;
+    }
+    .fine-badge, .fine-badge * {
+      color: #ffffff !important;
+    }
+    .text-white, .text-white * {
+      color: #ffffff !important;
+    }
+  </style>
+</body>
+</html>
