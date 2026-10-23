@@ -48,7 +48,15 @@ $$;
 -- 2. Ensure missing attendance after Saturday 11:00 PM auto-assigns points on rule basis:
 --    - 0 holidays used in active month -> point = 0, holiday_used = 1
 --    - >0 holidays used in active month -> point = 1, holiday_used = 1
-create or replace function public.choir_mark_missing_attendance(p_date date default null)
+drop function if exists public.choir_mark_missing_attendance() cascade;
+drop function if exists public.choir_mark_missing_attendance(date) cascade;
+drop function if exists public.choir_mark_missing_attendance(date, uuid) cascade;
+drop function if exists public.choir_mark_missing_attendance cascade;
+
+create or replace function public.choir_mark_missing_attendance(
+  p_date date default null,
+  p_user_id uuid default null
+)
 returns integer language plpgsql security definer set search_path = public as $$
 declare
   npt_now timestamptz := now() at time zone 'Asia/Kathmandu';
@@ -69,7 +77,7 @@ begin
     raise exception 'The specified date is not a Saturday.';
   end if;
 
-  if npt_date = (npt_now)::date and (npt_now)::time < time '23:00' then
+  if p_user_id is null and npt_date = (npt_now)::date and (npt_now)::time < time '23:00' then
     raise exception 'Missing attendance can only be marked after 11:00 PM Nepal time on Saturday.';
   end if;
 
@@ -98,15 +106,20 @@ begin
     'not_filled' as attendance_status
   from public.choir_profiles p
   where p.status = 'approved'
+    and (p_user_id is null or p.id = p_user_id)
     and not exists (
       select 1 from public.choir_attendance_stack s
-      where s.user_id = p.id and s.datefilled = npt_date
+      where s.user_id = p.id 
+        and s.datefilled = npt_date
+        and s.attendance_status in ('present', 'absent', 'not_filled')
     );
 
   get diagnostics inserted_count = row_count;
   return inserted_count;
 end;
 $$;
+
+grant execute on function public.choir_mark_missing_attendance(date, uuid) to authenticated;
 
 -- 3. Update RLS policy so all approved choir members can view the choir Statistics table
 drop policy if exists "choir aggregate self or admin read" on public.choir_attendance_aggregate;

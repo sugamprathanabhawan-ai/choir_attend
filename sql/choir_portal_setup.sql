@@ -238,7 +238,8 @@ begin
   select count(*) into already_holidays from public.choir_attendance_stack s
     join public.choir_settings st on st.id = 1 where s.user_id = p.id and s.month_name = st.month_name and s.holiday_used = 1;
   if npt_time <= time '09:50' then
-    v_on_time := 1; v_holiday := case when p_status = 'absent' then 1 else 0 end;
+    v_on_time := case when p_status = 'present' then 1 else 0 end;
+    v_holiday := case when p_status = 'absent' then 1 else 0 end;
     v_point := case when p_status = 'absent' and already_holidays > 0 then 1 else 0 end;
   else
     v_on_time := 0; v_holiday := 1;
@@ -505,6 +506,39 @@ begin
   return inserted_count;
 end;
 $$;
+
+drop function if exists public.choir_admin_update_member_status(uuid, text) cascade;
+drop function if exists public.choir_admin_update_member_status cascade;
+
+create or replace function public.choir_admin_update_member_status(
+  p_user_id uuid,
+  p_status text
+)
+returns public.choir_profiles language plpgsql security definer set search_path = public as $$
+declare
+  updated_profile public.choir_profiles;
+begin
+  if not public.choir_is_admin() then
+    raise exception 'Administrator access required.';
+  end if;
+  if p_status not in ('approved', 'rejected', 'deactivated', 'pending') then
+    raise exception 'Invalid member status: %', p_status;
+  end if;
+
+  update public.choir_profiles
+  set status = p_status, updated_at = now()
+  where id = p_user_id
+  returning * into updated_profile;
+
+  if not found then
+    raise exception 'Member not found.';
+  end if;
+
+  perform public.choir_rebuild_aggregate();
+  return updated_profile;
+end;
+$$;
+grant execute on function public.choir_admin_update_member_status(uuid, text) to authenticated;
 
 drop function if exists public.choir_symbol_available(text) cascade;
 create or replace function public.choir_symbol_available(p_symbol text)

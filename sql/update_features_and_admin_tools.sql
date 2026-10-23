@@ -75,7 +75,8 @@ returns integer language sql stable set search_path = public as $$
   select coalesce(count(*)::integer, 0)
   from public.choir_attendance_stack
   where user_id = p_user_id
-    and attendance_status = 'present';
+    and attendance_status = 'present'
+    and datefilled <= coalesce(p_active_sat, (now() at time zone 'Asia/Kathmandu')::date);
 $$;
 
 -- Security-definer RPC function to fetch streak for all approved members
@@ -85,7 +86,7 @@ returns table (
   streak integer
 ) language sql security definer set search_path = public as $$
   select p.id as user_id,
-         coalesce(count(s.id) filter (where s.attendance_status = 'present'), 0)::integer as streak
+         coalesce(count(s.id) filter (where s.attendance_status = 'present' and s.datefilled <= (now() at time zone 'Asia/Kathmandu')::date), 0)::integer as streak
   from public.choir_profiles p
   left join public.choir_attendance_stack s on s.user_id = p.id
   where p.status = 'approved'
@@ -442,6 +443,42 @@ end;
 $$;
 grant execute on function public.choir_save_selfie(text) to authenticated;
 
+drop function if exists public.choir_admin_update_member_status(uuid, text) cascade;
+drop function if exists public.choir_admin_update_member_status cascade;
+
+create or replace function public.choir_admin_update_member_status(
+  p_user_id uuid,
+  p_status text
+)
+returns public.choir_profiles language plpgsql security definer set search_path = public as $$
+declare
+  updated_profile public.choir_profiles;
+begin
+  if not public.choir_is_admin() then
+    raise exception 'Administrator access required.';
+  end if;
+  if p_status not in ('approved', 'rejected', 'deactivated', 'pending') then
+    raise exception 'Invalid member status: %', p_status;
+  end if;
+
+  update public.choir_profiles
+  set status = p_status, updated_at = now()
+  where id = p_user_id
+  returning * into updated_profile;
+
+  if not found then
+    raise exception 'Member not found.';
+  end if;
+
+  perform public.choir_rebuild_aggregate();
+  return updated_profile;
+end;
+$$;
+grant execute on function public.choir_admin_update_member_status(uuid, text) to authenticated;
+
+drop function if exists public.choir_submit_attendance(text, text, text) cascade;
+drop function if exists public.choir_submit_attendance cascade;
+
 create or replace function public.choir_submit_attendance(p_symbol text, p_status text, p_reason text default null)
 returns public.choir_attendance_stack language plpgsql security definer set search_path = public as $$
 declare
@@ -467,16 +504,20 @@ begin
   select count(*) into already_holidays from public.choir_attendance_stack s
     join public.choir_settings st on st.id = 1 where s.user_id = p.id and s.month_name = st.month_name and s.holiday_used = 1;
   if npt_time <= time '09:50' then
-    v_on_time := 1; v_holiday := case when p_status = 'absent' then 1 else 0 end;
+    v_on_time := case when p_status = 'present' then 1 else 0 end;
+    v_holiday := case when p_status = 'absent' then 1 else 0 end;
     v_point := case when p_status = 'absent' and already_holidays > 0 then 1 else 0 end;
   else
-    v_on_time := 0; v_holiday := 1;
+    v_on_time := 0;
+    v_holiday := 1;
     v_point := case when already_holidays > 0 then 1 else 0 end;
   end if;
   select month_name into active_month from public.choir_settings where id = 1;
   insert into public.choir_attendance_stack (user_id,symbol,datefilled,month_name,name,reason,time_filled,point,holiday_used,attendance_on_time,attendance_status)
   values (p.id,p.symbolnum,npt_date,active_month,p.full_name,nullif(trim(p_reason),''),now(),v_point,v_holiday,v_on_time,p_status)
   returning * into outrow;
+
+  perform public.choir_rebuild_aggregate();
   return outrow;
 end;
 $$;

@@ -19,7 +19,10 @@ alter table public.choir_attendance_aggregate
 add column if not exists on_time_streak integer default 0;
 
 -- 2. Function to compute a single member's unbroken continuous on-time streak
-create or replace function public.choir_calculate_user_streak(p_user_id uuid, p_active_sat date)
+drop function if exists public.choir_calculate_user_streak(uuid, date) cascade;
+drop function if exists public.choir_calculate_user_streak cascade;
+
+create or replace function public.choir_calculate_user_streak(p_user_id uuid, p_active_sat date default null)
 returns integer language plpgsql stable set search_path = public as $$
 declare
   v_streak integer := 0;

@@ -166,7 +166,8 @@ function supabaseRpc_(functionName, body) {
     method: 'post', contentType: 'application/json', payload: JSON.stringify(body), headers: supabaseHeaders_(cfg), muteHttpExceptions: true
   });
   if (response.getResponseCode() >= 300) throw new Error(`Supabase job failed: ${response.getContentText()}`);
-  return JSON.parse(response.getContentText());
+  const text = response.getContentText();
+  return text ? JSON.parse(text) : null;
 }
 
 function supabaseHeaders_(cfg) { return { apikey: cfg.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${cfg.SUPABASE_SERVICE_ROLE_KEY}` }; }

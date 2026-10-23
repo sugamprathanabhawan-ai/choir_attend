@@ -844,8 +844,8 @@ async function loadUnsubmittedSaturday(targetDate) {
   if (captionEl) captionEl.textContent = `Approved members who have not yet submitted attendance for Saturday (${satDate}).`;
 
   const [approvedRes, stackRes] = await Promise.all([
-    supabase.from('choir_profiles').select('id,full_name,symbolnum,email,phone_num').eq('status', 'approved').order('full_name'),
-    supabase.from('choir_attendance_stack').select('user_id,attendance_status').eq('datefilled', satDate)
+    supabase.from('choir_profiles').select('id,full_name,symbolnum,email,phone_num').eq('status', 'approved').order('full_name').limit(10000),
+    supabase.from('choir_attendance_stack').select('user_id,attendance_status').eq('datefilled', satDate).limit(10000)
   ]);
 
   if (approvedRes.error || stackRes.error) {
@@ -1257,7 +1257,7 @@ async function showMemberDetail(targetMemberId = null) {
       .order('datefilled', { ascending: false })
       .limit(1000),
     supabase.from('choir_attendance_aggregate')
-      .select('on_time_streak,points_received,holidays_used,on_time_count')
+      .select('on_time_streak,total_points,total_holiday_used,total_attendance_on_time')
       .eq('user_id', memberId)
       .maybeSingle(),
     supabase.from('choir_profiles')

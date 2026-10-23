@@ -193,8 +193,8 @@
       }
 
       // Initialize Supabase Client
-      const supabaseUrl = window.CHOIRPORTAL_CONFIG?.url;
-      const supabaseKey = window.CHOIRPORTAL_CONFIG?.anonKey;
+      const supabaseUrl = window.CHOIRPORTAL_CONFIG?.url || 'https://weylgvzitmrucsuwrphb.supabase.co';
+      const supabaseKey = window.CHOIRPORTAL_CONFIG?.anonKey || 'sb_publishable_ZGiPstKk6oKFvPIIjGZAkw_E69x7Doy';
       
       let supabaseClient;
       if (supabaseUrl && supabaseKey && typeof supabase !== 'undefined' && supabase.createClient) {
